@@ -1,0 +1,678 @@
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from typing import List, Dict, Optional
+import os
+
+from models.movie import MovieResponse, RecommendationResponse
+from services.ai_service import AIEnhancementService
+
+class RecommendationEngine:
+    def __init__(self):
+        self.movies_df = None
+        self.tfidf_matrix = None
+        self.tfidf_vectorizer = None
+        self.cosine_sim = None
+        self.ai_service = AIEnhancementService()
+        self.movie_db_service = None
+    
+    def load_data(self):
+        """Load movie dataset using TMDB (preferred) or Groq (fallback)"""
+        try:
+            # Try TMDB first (most reliable)
+            from services.tmdb_database_service import TMDBDatabaseService
+            tmdb_service = TMDBDatabaseService()
+            
+            if tmdb_service.enabled:
+                print("Attempting to generate 1200 movies from TMDB...")
+                movies = tmdb_service.generate_movie_database(1200)
+                if movies and len(movies) >= 500:  # TMDB should reliably get 500+
+                    self.movies_df = pd.DataFrame(movies)
+                    print(f"✓ Generated {len(self.movies_df)} movies using TMDB")
+                    self.prepare_features()
+                    return
+                else:
+                    print(f"⚠ TMDB returned only {len(movies)} movies, trying Groq...")
+            
+            # Fallback to Groq if TMDB unavailable or insufficient
+            from services.groq_service import GroqService
+            groq_service = GroqService()
+            
+            if groq_service.enabled:
+                print("Attempting to generate 1200 movies from Groq...")
+                movies = groq_service.generate_movie_database(1200)
+                if movies and len(movies) >= 100:
+                    self.movies_df = pd.DataFrame(movies)
+                    print(f"✓ Generated {len(self.movies_df)} movies using Groq")
+                    self.prepare_features()
+                    return
+                else:
+                    print(f"⚠ Groq returned only {len(movies) if movies else 0} movies, using expanded sample")
+            
+            self.create_sample_dataset()
+            print(f"✓ Using expanded sample dataset with {len(self.movies_df)} movies")
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            self.create_sample_dataset()
+    
+    def create_sample_dataset(self):
+        """Create a comprehensive movie dataset from all industries"""
+        sample_movies = [
+            {"id": 1, "title": "Bang Bang", "genres": "Action, Thriller, Romance", "description": "A young bank receptionist gets entangled in the world of international espionage", "rating": 5.6, "year": 2014, "release_month": 10},
+            {"id": 2, "title": "The Matrix", "genres": "Action, Sci-Fi", "description": "A computer hacker learns about the true nature of reality", "rating": 8.7, "year": 1999, "release_month": 3},
+            {"id": 3, "title": "Inception", "genres": "Action, Sci-Fi, Thriller", "description": "A thief who steals corporate secrets through dream-sharing technology", "rating": 8.8, "year": 2010, "release_month": 7},
+            {"id": 4, "title": "The Dark Knight", "genres": "Action, Crime, Drama", "description": "Batman faces the Joker in a battle for Gotham's soul", "rating": 9.0, "year": 2008, "release_month": 7},
+            {"id": 5, "title": "3 Idiots", "genres": "Comedy, Drama", "description": "Two friends search for their long lost companion who inspired them to think differently", "rating": 8.4, "year": 2009, "release_month": 12},
+            {"id": 6, "title": "Dangal", "genres": "Biography, Drama, Sport", "description": "Former wrestler Mahavir Singh Phogat trains his daughters to become world-class wrestlers", "rating": 8.4, "year": 2016, "release_month": 12},
+            {"id": 7, "title": "Baahubali", "genres": "Action, Drama, Fantasy", "description": "A young man learns about his royal heritage and fights to reclaim his kingdom", "rating": 8.0, "year": 2015, "release_month": 7},
+            {"id": 8, "title": "RRR", "genres": "Action, Drama, History", "description": "A fictitious story about two legendary freedom fighters", "rating": 7.9, "year": 2022, "release_month": 3},
+            {"id": 9, "title": "Pushpa", "genres": "Action, Crime, Thriller", "description": "A laborer rises through the ranks of a red sandalwood smuggling syndicate", "rating": 7.6, "year": 2021, "release_month": 12},
+            {"id": 10, "title": "KGF", "genres": "Action, Crime, Drama", "description": "Rocky rises from poverty to become the king of a gold mine", "rating": 8.2, "year": 2018, "release_month": 12},
+            {"id": 11, "title": "Parasite", "genres": "Comedy, Drama, Thriller", "description": "A poor family schemes to become employed by a wealthy family", "rating": 8.5, "year": 2019, "release_month": 5},
+            {"id": 12, "title": "Your Name", "genres": "Animation, Drama, Romance", "description": "Two teenagers share a profound, magical connection upon discovering they are swapping bodies", "rating": 8.2, "year": 2016, "release_month": 8},
+            {"id": 13, "title": "Avengers: Endgame", "genres": "Action, Adventure, Drama", "description": "The Avengers assemble once more to reverse Thanos' actions", "rating": 8.4, "year": 2019, "release_month": 4},
+            {"id": 14, "title": "Titanic", "genres": "Drama, Romance", "description": "A seventeen-year-old aristocrat falls in love with a poor artist aboard the Titanic", "rating": 7.9, "year": 1997, "release_month": 12},
+            {"id": 15, "title": "Sholay", "genres": "Action, Adventure, Drama", "description": "Two criminals are hired to capture a ruthless dacoit who terrorizes the region", "rating": 8.2, "year": 1975, "release_month": 8},
+            {"id": 16, "title": "Oldboy", "genres": "Action, Drama, Mystery", "description": "A man seeks revenge after being imprisoned for 15 years without knowing why", "rating": 8.4, "year": 2003, "release_month": 11},
+            {"id": 17, "title": "Train to Busan", "genres": "Action, Horror, Thriller", "description": "Passengers fight for survival during a zombie outbreak on a train", "rating": 7.6, "year": 2016, "release_month": 7},
+            {"id": 18, "title": "Spirited Away", "genres": "Animation, Adventure, Family", "description": "A girl enters a world ruled by gods and witches where humans are changed into beasts", "rating": 9.2, "year": 2001, "release_month": 7},
+            {"id": 19, "title": "Interstellar", "genres": "Adventure, Drama, Sci-Fi", "description": "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival", "rating": 8.6, "year": 2014, "release_month": 11},
+            {"id": 20, "title": "The Godfather", "genres": "Crime, Drama", "description": "The aging patriarch of an organized crime dynasty transfers control to his reluctant son", "rating": 9.2, "year": 1972, "release_month": 3},
+            
+            # More Bollywood
+            {"id": 21, "title": "Lagaan", "genres": "Drama, Musical, Sport", "description": "Villagers accept challenge to play cricket to avoid taxes", "rating": 8.1, "year": 2001, "release_month": 6},
+            {"id": 22, "title": "Dil Chahta Hai", "genres": "Comedy, Drama, Romance", "description": "Three friends navigate love and life after college", "rating": 8.1, "year": 2001, "release_month": 8},
+            {"id": 23, "title": "Zindagi Na Milegi Dobara", "genres": "Comedy, Drama, Musical", "description": "Three friends on Spanish bachelor party trip", "rating": 8.2, "year": 2011, "release_month": 7},
+            {"id": 24, "title": "Queen", "genres": "Comedy, Drama", "description": "Woman goes on honeymoon alone after breakup", "rating": 8.2, "year": 2014, "release_month": 3},
+            {"id": 25, "title": "PK", "genres": "Comedy, Drama, Sci-Fi", "description": "Alien questions religious beliefs in India", "rating": 8.1, "year": 2014, "release_month": 12},
+            {"id": 26, "title": "Taare Zameen Par", "genres": "Drama, Family", "description": "Teacher helps dyslexic child discover his potential", "rating": 8.4, "year": 2007, "release_month": 12},
+            {"id": 27, "title": "Chak De India", "genres": "Drama, Sport", "description": "Disgraced hockey player coaches women's team", "rating": 8.2, "year": 2007, "release_month": 8},
+            {"id": 28, "title": "Swades", "genres": "Drama", "description": "NASA scientist returns to reconnect with his roots", "rating": 8.2, "year": 2004, "release_month": 12},
+            {"id": 29, "title": "Rang De Basanti", "genres": "Comedy, Drama, History", "description": "Students become activists after reenacting revolutionaries", "rating": 8.1, "year": 2006, "release_month": 1},
+            {"id": 30, "title": "Barfi!", "genres": "Comedy, Drama, Romance", "description": "Deaf-mute man finds love in unexpected ways", "rating": 8.1, "year": 2012, "release_month": 9},
+            
+            # Tollywood (Telugu)
+            {"id": 31, "title": "Eega", "genres": "Action, Fantasy, Romance", "description": "Man reincarnates as fly to get revenge", "rating": 7.7, "year": 2012, "release_month": 7},
+            {"id": 32, "title": "Arjun Reddy", "genres": "Drama, Romance", "description": "Surgeon spirals into self-destruction after breakup", "rating": 8.1, "year": 2017, "release_month": 8},
+            {"id": 33, "title": "Magadheera", "genres": "Action, Fantasy, Romance", "description": "Reincarnation love story spanning 400 years", "rating": 7.7, "year": 2009, "release_month": 7},
+            {"id": 34, "title": "Rangasthalam", "genres": "Action, Drama", "description": "Hearing-impaired man fights village corruption", "rating": 8.2, "year": 2018, "release_month": 3},
+            {"id": 35, "title": "Ala Vaikunthapurramuloo", "genres": "Action, Drama", "description": "Man discovers he was switched at birth", "rating": 7.2, "year": 2020, "release_month": 1},
+            
+            # Kollywood (Tamil)
+            {"id": 36, "title": "Vikram Vedha", "genres": "Action, Crime, Thriller", "description": "Gangster challenges cop's moral compass", "rating": 8.4, "year": 2017, "release_month": 7},
+            {"id": 37, "title": "Kaththi", "genres": "Action, Thriller", "description": "Thief impersonates look-alike activist", "rating": 8.1, "year": 2014, "release_month": 10},
+            {"id": 38, "title": "Thani Oruvan", "genres": "Action, Crime, Thriller", "description": "Cop pursues brilliant but corrupt scientist", "rating": 8.5, "year": 2015, "release_month": 8},
+            {"id": 39, "title": "Nayakan", "genres": "Crime, Drama", "description": "Boy becomes underworld don protecting slum dwellers", "rating": 8.6, "year": 1987, "release_month": 10},
+            {"id": 40, "title": "Super Deluxe", "genres": "Drama, Mystery, Thriller", "description": "Four interconnected stories explore morality", "rating": 8.3, "year": 2019, "release_month": 3},
+            
+            # Mollywood (Malayalam)
+            {"id": 41, "title": "Drishyam", "genres": "Crime, Drama, Thriller", "description": "Family man uses films to create perfect alibi", "rating": 8.6, "year": 2013, "release_month": 12},
+            {"id": 42, "title": "Premam", "genres": "Comedy, Drama, Romance", "description": "Man's three stages of love through life", "rating": 8.3, "year": 2015, "release_month": 5},
+            {"id": 43, "title": "Bangalore Days", "genres": "Comedy, Drama, Romance", "description": "Three cousins chase dreams in Bangalore", "rating": 8.3, "year": 2014, "release_month": 5},
+            {"id": 44, "title": "Maheshinte Prathikaaram", "genres": "Comedy, Drama", "description": "Photographer seeks revenge in village", "rating": 8.2, "year": 2016, "release_month": 2},
+            {"id": 45, "title": "Kumbalangi Nights", "genres": "Drama, Family", "description": "Four brothers find purpose through love", "rating": 8.7, "year": 2019, "release_month": 2},
+            
+            # Hollywood Action/Sci-Fi
+            {"id": 46, "title": "The Shawshank Redemption", "genres": "Drama", "description": "Banker befriends fellow prisoner over decades", "rating": 9.3, "year": 1994, "release_month": 9},
+            {"id": 47, "title": "The Dark Knight", "genres": "Action, Crime, Drama", "description": "Batman faces the anarchic Joker", "rating": 9.0, "year": 2008, "release_month": 7},
+            {"id": 48, "title": "Inception", "genres": "Action, Sci-Fi, Thriller", "description": "Thief enters dreams to plant ideas", "rating": 8.8, "year": 2010, "release_month": 7},
+            {"id": 49, "title": "The Matrix", "genres": "Action, Sci-Fi", "description": "Hacker discovers reality is simulation", "rating": 8.7, "year": 1999, "release_month": 3},
+            {"id": 50, "title": "Forrest Gump", "genres": "Drama, Romance", "description": "Simple man influences major historical events", "rating": 8.8, "year": 1994, "release_month": 7},
+            {"id": 51, "title": "The Lord of the Rings: The Return of the King", "genres": "Adventure, Drama, Fantasy", "description": "Final battle for Middle-earth", "rating": 9.0, "year": 2003, "release_month": 12},
+            {"id": 52, "title": "Pulp Fiction", "genres": "Crime, Drama", "description": "Interconnected LA crime stories", "rating": 8.9, "year": 1994, "release_month": 10},
+            {"id": 53, "title": "Fight Club", "genres": "Drama", "description": "Insomniac and soap maker form underground club", "rating": 8.8, "year": 1999, "release_month": 10},
+            {"id": 54, "title": "Gladiator", "genres": "Action, Adventure, Drama", "description": "General becomes gladiator for revenge", "rating": 8.5, "year": 2000, "release_month": 5},
+            {"id": 55, "title": "The Prestige", "genres": "Drama, Mystery, Sci-Fi", "description": "Rival magicians engage in deadly competition", "rating": 8.5, "year": 2006, "release_month": 10}
+        ]
+        
+        # Load additional 200 movies from data file
+        try:
+            import sys
+            import os
+            # Add backend directory to path
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if backend_dir not in sys.path:
+                sys.path.insert(0, backend_dir)
+            
+            from data.additional_movies import ADDITIONAL_MOVIES
+            sample_movies.extend(ADDITIONAL_MOVIES)
+            print(f"✓ Loaded {len(sample_movies)} movies from expanded sample dataset (including additional movies)")
+        except Exception as e:
+            print(f"⚠ Could not load additional movies: {e}")
+            print(f"✓ Loaded {len(sample_movies)} movies from base sample dataset")
+        
+        self.movies_df = pd.DataFrame(sample_movies)
+    
+    def train_model(self):
+        """Train the recommendation model using TF-IDF and cosine similarity"""
+        if self.movies_df is None:
+            raise Exception("Data not loaded. Call load_data() first.")
+        
+        # Create combined features for content-based filtering
+        self.movies_df['combined_features'] = (
+            self.movies_df['genres'].fillna('') + ' ' +
+            self.movies_df['description'].fillna('') + ' ' +
+            self.movies_df['title'].fillna('')
+        )
+        
+        # Create TF-IDF matrix
+        self.tfidf_vectorizer = TfidfVectorizer(
+            stop_words='english',
+            ngram_range=(1, 2),
+            max_features=5000
+        )
+        
+        self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(
+            self.movies_df['combined_features']
+        )
+        
+        # Calculate cosine similarity matrix
+        self.cosine_sim = cosine_similarity(self.tfidf_matrix, self.tfidf_matrix)
+        
+        print("Model trained successfully")
+    
+    def get_movie_index(self, title: str) -> Optional[int]:
+        """Get the index of a movie by title"""
+        matches = self.movies_df[
+            self.movies_df['title'].str.lower() == title.lower()
+        ]
+        if len(matches) > 0:
+            return matches.index[0]
+        return None
+    
+    def get_movies(self, limit: int = 100, search: Optional[str] = None) -> List[Dict]:
+        """Get all movies for search/recommend functionality"""
+        if self.movies_df is None:
+            return []
+        
+        # Include ALL movies regardless of release date
+        filtered_df = self.movies_df.copy()
+        
+        if search:
+            search_lower = search.lower()
+            filtered_df = filtered_df[
+                filtered_df['title'].str.lower().str.contains(search_lower, na=False) |
+                filtered_df['genres'].str.lower().str.contains(search_lower, na=False)
+            ]
+        
+        movies = []
+        for _, movie in filtered_df.head(limit).iterrows():
+            movies.append({
+                'id': int(movie['id']),
+                'title': movie['title'],
+                'genres': movie['genres'],
+                'description': movie['description'],
+                'rating': float(movie['rating']),
+                'year': int(movie['year']),
+                'release_month': int(movie['release_month']) if pd.notna(movie['release_month']) else None
+            })
+        
+        return movies
+    
+    def search_by_preferences(
+        self,
+        favorite_genres: List[str],
+        min_rating: float,
+        preferred_decade: int,
+        limit: int = 20
+    ) -> List[Dict]:
+        """Search movies that match user preferences"""
+        if self.movies_df is None:
+            return []
+        
+        filtered_df = self.movies_df.copy()
+        
+        # Filter by minimum rating
+        filtered_df = filtered_df[filtered_df['rating'] >= min_rating]
+        
+        # Filter by genres if specified
+        if favorite_genres:
+            genre_pattern = '|'.join(favorite_genres)
+            filtered_df = filtered_df[
+                filtered_df['genres'].str.contains(genre_pattern, case=False, na=False)
+            ]
+        
+        # Filter by decade (within 10 years of preferred decade)
+        decade_start = preferred_decade - 5
+        decade_end = preferred_decade + 14  # Include the full decade plus adjacent years
+        filtered_df = filtered_df[
+            (filtered_df['year'] >= decade_start) & (filtered_df['year'] <= decade_end)
+        ]
+        
+        # Sort by rating (highest first) and then by year (newest first)
+        filtered_df = filtered_df.sort_values(
+            by=['rating', 'year'], 
+            ascending=[False, False]
+        )
+        
+        movies = []
+        for _, movie in filtered_df.head(limit).iterrows():
+            movies.append({
+                'id': int(movie['id']),
+                'title': movie['title'],
+                'genres': movie['genres'],
+                'description': movie['description'],
+                'rating': float(movie['rating']),
+                'year': int(movie['year']),
+                'release_month': int(movie['release_month']) if pd.notna(movie['release_month']) else None
+            })
+        
+        return movies
+    
+    def get_movie_by_id(self, movie_id: int) -> Optional[Dict]:
+        """Get a specific movie by ID"""
+        if self.movies_df is None:
+            return None
+        
+        matches = self.movies_df[self.movies_df['id'] == movie_id]
+        if len(matches) > 0:
+            movie = matches.iloc[0]
+            return {
+                'id': int(movie['id']),
+                'title': movie['title'],
+                'genres': movie['genres'],
+                'description': movie['description'],
+                'rating': float(movie['rating']),
+                'year': int(movie['year']),
+                'release_month': int(movie['release_month']) if pd.notna(movie['release_month']) else None
+            }
+        return None
+    
+    def recommend(
+        self,
+        movie_title: str,
+        user_preferences: Dict,
+        num_recommendations: int = 5
+    ) -> RecommendationResponse:
+        """
+        Generate recommendations based on movie title and user preferences
+        """
+        movie_idx = self.get_movie_index(movie_title)
+        
+        if movie_idx is None:
+            return RecommendationResponse(
+                should_watch=False,
+                confidence=0.0,
+                reason=f"Movie '{movie_title}' not found in database",
+                recommended_movies=[],
+                target_movie=None
+            )
+        
+        # Get the target movie details
+        target_movie = self.movies_df.iloc[movie_idx]
+        
+        # Get similarity scores
+        sim_scores = list(enumerate(self.cosine_sim[movie_idx]))
+        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+        
+        # Get recommended movie indices (deduplicated by movie ID)
+        recommended_movies = []
+        seen_ids = {int(target_movie['id'])}  # Track seen IDs, exclude target movie
+        
+        for idx, score in sim_scores[1:]:  # Skip first item (the movie itself)
+            if len(recommended_movies) >= num_recommendations:
+                break
+                
+            movie = self.movies_df.iloc[idx]
+            movie_id = int(movie['id'])
+            
+            # Skip if we've already added this movie
+            if movie_id in seen_ids:
+                continue
+                
+            seen_ids.add(movie_id)
+            
+            # Generate reason for this recommendation
+            reason = self._generate_recommendation_reason(
+                target_movie=target_movie,
+                recommended_movie=movie,
+                similarity_score=score
+            )
+            
+            recommended_movies.append(MovieResponse(
+                id=movie_id,
+                title=movie['title'],
+                genres=movie['genres'],
+                description=movie['description'],
+                rating=float(movie['rating']),
+                year=int(movie['year']),
+                release_month=int(movie['release_month']) if pd.notna(movie['release_month']) else None,
+                reason=reason,
+                similarity_score=float(score)
+            ))
+        
+        # Determine if user should watch based on preferences
+        should_watch, confidence, reason = self._analyze_preferences(
+            target_movie,
+            user_preferences
+        )
+        # Enhance reason with AI if available
+        if self.ai_service.enabled:
+            reason = self.ai_service.enhance_recommendation_reason(
+                movie_title=target_movie['title'],
+                genres=target_movie['genres'],
+                rating=float(target_movie['rating']),
+                user_preferences=user_preferences,
+                base_reason=reason
+            )
+        
+        
+        return RecommendationResponse(
+            should_watch=should_watch,
+            confidence=confidence,
+            reason=reason,
+            recommended_movies=recommended_movies,
+            target_movie=MovieResponse(
+                id=int(target_movie['id']),
+                title=target_movie['title'],
+                genres=target_movie['genres'],
+                description=target_movie['description'],
+                rating=float(target_movie['rating']),
+                year=int(target_movie['year']),
+                release_month=int(target_movie['release_month']) if pd.notna(target_movie['release_month']) else None
+            )
+        )
+    
+    def _analyze_preferences(
+        self,
+        movie: pd.Series,
+        preferences: Dict
+    ) -> tuple:
+        """Analyze if movie matches user preferences"""
+        score = 0
+        max_score = 0
+        reasons = []
+        
+        # Check genre preferences (weighted lower)
+        if 'favorite_genres' in preferences and preferences['favorite_genres']:
+            max_score += 30
+            movie_genres = set(movie['genres'].lower().split(', '))
+            user_genres = set(g.lower() for g in preferences['favorite_genres'])
+            genre_overlap = movie_genres.intersection(user_genres)
+            
+            if genre_overlap:
+                genre_score = (len(genre_overlap) / len(user_genres)) * 30
+                score += genre_score
+                reasons.append(f"Matches your favorite genres: {', '.join(genre_overlap)}")
+            else:
+                # Still give some points for quality movies even if genre doesn't match
+                if movie['rating'] >= 8.0:
+                    score += 10  # Partial credit for high-quality films
+                    reasons.append(f"Highly rated {movie['genres']} film")
+                else:
+                    reasons.append(f"{movie['genres']} - different from your usual preferences")
+        
+        # Check minimum rating preference (most important)
+        if 'min_rating' in preferences:
+            max_score += 50  # Increased weight for quality
+            min_rating = preferences['min_rating']
+            if movie['rating'] >= min_rating:
+                # Give full points if it meets the rating
+                score += 50
+                if movie['rating'] >= 8.0:
+                    reasons.append(f"Excellent rating: {movie['rating']}/10")
+                else:
+                    reasons.append(f"Good rating: {movie['rating']}/10")
+            else:
+                # Partial credit if close to minimum
+                rating_gap = min_rating - movie['rating']
+                if rating_gap <= 1.0:
+                    score += 25
+                    reasons.append(f"Rating {movie['rating']}/10 is close to your preference")
+                else:
+                    reasons.append(f"Rating {movie['rating']}/10 is below your minimum")
+        
+        # Check year preference (weighted lower)
+        if 'preferred_decade' in preferences:
+            max_score += 20
+            preferred_decade = preferences['preferred_decade']
+            movie_decade = (movie['year'] // 10) * 10
+            year_diff = abs(movie['year'] - preferred_decade)
+            
+            if movie_decade == preferred_decade:
+                score += 20
+                reasons.append(f"From your preferred decade: {preferred_decade}s")
+            elif year_diff <= 10:
+                # Give partial credit for adjacent decades
+                score += 10
+                reasons.append(f"From {movie_decade}s (close to {preferred_decade}s)")
+        
+        # Calculate confidence
+        confidence = (score / max_score * 100) if max_score > 0 else 50
+        
+        # Adjusted threshold: 50% or above is worth watching
+        should_watch = confidence >= 50
+        
+        reason = " | ".join(reasons) if reasons else "Based on content similarity"
+        
+        return should_watch, round(confidence, 2), reason
+    
+    def _generate_recommendation_reason(
+        self,
+        target_movie: pd.Series,
+        recommended_movie: pd.Series,
+        similarity_score: float
+    ) -> str:
+        """Generate a personalized reason for why this movie was recommended"""
+        reasons = []
+        
+        # Genre overlap
+        target_genres = set(target_movie['genres'].lower().split(', '))
+        recommended_genres = set(recommended_movie['genres'].lower().split(', '))
+        common_genres = target_genres & recommended_genres
+        
+        if common_genres:
+            genre_list = ', '.join(sorted(common_genres))
+            reasons.append(f"Shares {genre_list} genre{' ' if len(common_genres) == 1 else 's'}")
+        
+        # Similar rating
+        rating_diff = abs(float(target_movie['rating']) - float(recommended_movie['rating']))
+        if rating_diff < 0.5:
+            reasons.append(f"Similar rating ({float(recommended_movie['rating'])}/10)")
+        
+        # Same era
+        target_decade = (int(target_movie['year']) // 10) * 10
+        recommended_decade = (int(recommended_movie['year']) // 10) * 10
+        if target_decade == recommended_decade:
+            reasons.append(f"From the same era ({recommended_decade}s)")
+        
+        # High similarity
+        if similarity_score > 0.7:
+            reasons.append("Very similar content and themes")
+        elif similarity_score > 0.5:
+            reasons.append("Similar storyline and style")
+        
+        if reasons:
+            return " • ".join(reasons)
+        else:
+            return "Recommended based on content similarity"
+    
+    def get_movies(self, limit: int = 100, search: Optional[str] = None) -> List[MovieResponse]:
+        """Get list of movies - exclude current month movies, search in CSV first, then use AI for any movie"""
+        from datetime import datetime
+
+        current_date = datetime.now()
+        current_year = current_date.year
+        current_month = current_date.month
+
+        # Filter out movies from current month
+        filtered_df = self.movies_df[
+            ~((self.movies_df['year'] == current_year) & (self.movies_df['release_month'] == current_month))
+        ]
+
+        if not search:
+            # Return all movies from filtered CSV if no search
+            df = filtered_df.head(limit)
+            movies = []
+            for _, movie in df.iterrows():
+                movies.append(MovieResponse(
+                    id=int(movie['id']),
+                    title=movie['title'],
+                    genres=movie['genres'],
+                    description=movie['description'],
+                    rating=float(movie['rating']),
+                    year=int(movie['year']),
+                    release_month=int(movie['release_month']) if pd.notna(movie['release_month']) else None
+                ))
+            return movies
+
+        # Search in filtered CSV first
+        df = filtered_df[
+            filtered_df['title'].str.contains(search, case=False, na=False) |
+            filtered_df['genres'].str.contains(search, case=False, na=False)
+        ].head(limit)
+
+        # If found in CSV, return those
+        if len(df) > 0:
+            movies = []
+            for _, movie in df.iterrows():
+                movies.append(MovieResponse(
+                    id=int(movie['id']),
+                    title=movie['title'],
+                    genres=movie['genres'],
+                    description=movie['description'],
+                    rating=float(movie['rating']),
+                    year=int(movie['year']),
+                    release_month=int(movie['release_month']) if pd.notna(movie['release_month']) else None
+                ))
+            return movies
+
+        # Not found in CSV - use AI to search for the movie
+        if self.ai_service.enabled:
+            try:
+                ai_movies = self.ai_service.search_movie_by_title(search)
+                return ai_movies
+            except:
+                pass
+
+        return []
+    
+    def get_movie_by_id(self, movie_id: int) -> Optional[MovieResponse]:
+        """Get a specific movie by ID"""
+        movie_data = self.movies_df[self.movies_df['id'] == movie_id]
+        
+        if len(movie_data) == 0:
+            return None
+        
+        movie = movie_data.iloc[0]
+        return MovieResponse(
+            id=int(movie['id']),
+            title=movie['title'],
+            genres=movie['genres'],
+            description=movie['description'],
+            rating=float(movie['rating']),
+            year=int(movie['year'])
+        )
+    def _generate_movie_database(self) -> List[Dict]:
+        """Generate comprehensive movie database using AI"""
+        if not self.movie_db_service or not self.movie_db_service.enabled:
+            return []
+            
+        try:
+            prompt = """Generate a comprehensive movie database with 100+ popular movies from all industries and time periods (excluding December 2025).
+
+Include movies from:
+- Hollywood classics and modern hits
+- Bollywood blockbusters
+- Tollywood hits
+- Korean cinema
+- Japanese films
+- Other international cinema
+
+For EACH movie, provide in this EXACT format:
+
+MOVIE 1:
+Title: [Movie Title]
+Year: [Release Year - NOT 2025 December]
+Rating: [6.0-9.5 based on actual ratings]
+Industry: [Hollywood/Bollywood/Tollywood/Korean/etc]
+Genres: [Genre1, Genre2, Genre3]
+Description: [One sentence plot summary]
+Month: [Release month 1-12, avoid December if 2025]
+
+Include popular movies like:
+- Bang Bang (Bollywood action)
+- The Matrix, Inception, Avengers series
+- Baahubali, RRR, KGF
+- Parasite, Oldboy
+- Your Name, Spirited Away
+- And many more across all genres and years
+
+Generate at least 100 movies to ensure comprehensive search results."""
+
+            messages = [
+                {"role": "system", "content": "You are a comprehensive movie database expert with knowledge of global cinema across all time periods and industries."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response = self.movie_db_service._call_llama(messages, max_tokens=4000, temperature=0.5)
+            
+            if response:
+                return self._parse_movie_database(response)
+            
+        except Exception as e:
+            print(f"Error generating movie database: {e}")
+        
+        return []
+
+    def _parse_movie_database(self, text: str) -> List[Dict]:
+        """Parse AI-generated movie database"""
+        movies = []
+        
+        try:
+            movie_blocks = text.split('MOVIE ')
+            
+            for block in movie_blocks[1:]:
+                lines = block.strip().split('\n')
+                movie = {'id': len(movies) + 1}
+                
+                for line in lines:
+                    line = line.strip()
+                    if ':' not in line:
+                        continue
+                    
+                    key, value = line.split(':', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    
+                    if key == 'title':
+                        movie['title'] = value
+                    elif key == 'year':
+                        try:
+                            movie['year'] = int(value)
+                        except:
+                            movie['year'] = 2020
+                    elif key == 'rating':
+                        try:
+                            movie['rating'] = float(value)
+                        except:
+                            movie['rating'] = 7.0
+                    elif key == 'industry':
+                        movie['industry'] = value
+                    elif key == 'genres':
+                        movie['genres'] = value
+                    elif key == 'description':
+                        movie['description'] = value
+                    elif key == 'month':
+                        try:
+                            month = int(value)
+                            # Avoid December 2025 releases
+                            if movie.get('year') == 2025 and month == 12:
+                                month = 11
+                            movie['release_month'] = month
+                        except:
+                            movie['release_month'] = 6
+                
+                if 'title' in movie and 'description' in movie:
+                    movie.setdefault('genres', 'Drama')
+                    movie.setdefault('industry', 'International')
+                    movie.setdefault('rating', 7.0)
+                    movie.setdefault('year', 2020)
+                    movie.setdefault('release_month', 6)
+                    movies.append(movie)
+            
+        except Exception as e:
+            print(f"Error parsing movie database: {e}")
+        
+        return movies

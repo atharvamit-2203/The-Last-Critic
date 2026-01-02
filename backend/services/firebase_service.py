@@ -1,0 +1,168 @@
+import os
+import firebase_admin
+from firebase_admin import credentials, firestore
+from typing import Dict, Optional, List
+from datetime import datetime
+from pathlib import Path
+
+class FirebaseService:
+    def __init__(self):
+        """Initialize Firebase Admin SDK"""
+        try:
+            # Check if Firebase is already initialized
+            firebase_admin.get_app()
+        except ValueError:
+            # Initialize Firebase Admin SDK with service account
+            # Look for service account file in parent directory (Movie Recommendation folder)
+            service_account_path = Path(__file__).parent.parent.parent / "paisa-buddy-c7145-firebase-adminsdk-fbsvc-00cb318b79.json"
+            
+            if service_account_path.exists():
+                cred = credentials.Certificate(str(service_account_path))
+                firebase_admin.initialize_app(cred)
+                print("Firebase initialized with service account key")
+            else:
+                # Fallback to alternative location
+                service_account_path = Path(__file__).parent.parent / "firebase-admin-key.json"
+                if service_account_path.exists():
+                    cred = credentials.Certificate(str(service_account_path))
+                    firebase_admin.initialize_app(cred)
+                    print("Firebase initialized with service account key")
+                else:
+                    print("Warning: firebase service account key not found.")
+                    print("Some features may be limited. Please generate service account key.")
+                    # Initialize with project ID only (limited functionality)
+                    try:
+                        firebase_admin.initialize_app(options={
+                            'projectId': 'paisa-buddy-c7145'
+                        })
+                    except Exception as e:
+                        print(f"Error initializing Firebase: {e}")
+                        raise
+        
+        self.db = firestore.client()
+    
+    def create_user(self, user_id: str, email: str, display_name: str, photo_url: Optional[str] = None) -> Dict:
+        """Create or update user in Firestore"""
+        try:
+            user_ref = self.db.collection('users').document(user_id)
+            user_data = {
+                'email': email,
+                'displayName': display_name,
+                'photoURL': photo_url,
+                'createdAt': firestore.SERVER_TIMESTAMP,
+                'lastLogin': firestore.SERVER_TIMESTAMP,
+                'preferences': {
+                    'favorite_genres': [],
+                    'min_rating': 7.0,
+                    'preferred_decade': 2000
+                },
+                'watchHistory': [],
+                'favorites': []
+            }
+            user_ref.set(user_data, merge=True)
+            return {'success': True, 'user_id': user_id}
+        except Exception as e:
+            print(f"Error creating user: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def get_user(self, user_id: str) -> Optional[Dict]:
+        """Get user data from Firestore"""
+        try:
+            user_ref = self.db.collection('users').document(user_id)
+            doc = user_ref.get()
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            print(f"Error getting user: {e}")
+            return None
+    
+    def update_user_preferences(self, user_id: str, preferences: Dict) -> Dict:
+        """Update user preferences"""
+        try:
+            user_ref = self.db.collection('users').document(user_id)
+            user_ref.update({
+                'preferences': preferences,
+                'updatedAt': firestore.SERVER_TIMESTAMP
+            })
+            return {'success': True}
+        except Exception as e:
+            print(f"Error updating preferences: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def add_to_watch_history(self, user_id: str, movie_data: Dict) -> Dict:
+        """Add movie to user's watch history"""
+        try:
+            user_ref = self.db.collection('users').document(user_id)
+            watch_entry = {
+                'movieId': movie_data.get('id'),
+                'title': movie_data.get('title'),
+                'watchedAt': firestore.SERVER_TIMESTAMP
+            }
+            user_ref.update({
+                'watchHistory': firestore.ArrayUnion([watch_entry])
+            })
+            return {'success': True}
+        except Exception as e:
+            print(f"Error adding to watch history: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def add_to_favorites(self, user_id: str, movie_id: str) -> Dict:
+        """Add movie to user's favorites"""
+        try:
+            user_ref = self.db.collection('users').document(user_id)
+            user_ref.update({
+                'favorites': firestore.ArrayUnion([movie_id])
+            })
+            return {'success': True}
+        except Exception as e:
+            print(f"Error adding to favorites: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def remove_from_favorites(self, user_id: str, movie_id: str) -> Dict:
+        """Remove movie from user's favorites"""
+        try:
+            user_ref = self.db.collection('users').document(user_id)
+            user_ref.update({
+                'favorites': firestore.ArrayRemove([movie_id])
+            })
+            return {'success': True}
+        except Exception as e:
+            print(f"Error removing from favorites: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def get_user_favorites(self, user_id: str) -> List[str]:
+        """Get user's favorite movie IDs"""
+        try:
+            user = self.get_user(user_id)
+            if user:
+                return user.get('favorites', [])
+            return []
+        except Exception as e:
+            print(f"Error getting favorites: {e}")
+            return []
+    
+    def initialize_collections(self):
+        """Initialize Firestore collections with sample structure"""
+        try:
+            # Create a sample user document to initialize the collection
+            sample_user = {
+                'email': 'sample@example.com',
+                'displayName': 'Sample User',
+                'photoURL': None,
+                'createdAt': firestore.SERVER_TIMESTAMP,
+                'lastLogin': firestore.SERVER_TIMESTAMP,
+                'preferences': {
+                    'favorite_genres': ['Action', 'Drama'],
+                    'min_rating': 7.0,
+                    'preferred_decade': 2020
+                },
+                'watchHistory': [],
+                'favorites': []
+            }
+            self.db.collection('users').document('sample_user').set(sample_user)
+            print("Firestore collections initialized successfully")
+            return {'success': True}
+        except Exception as e:
+            print(f"Error initializing collections: {e}")
+            return {'success': False, 'error': str(e)}
