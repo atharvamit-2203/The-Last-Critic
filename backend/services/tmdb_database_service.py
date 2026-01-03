@@ -82,10 +82,17 @@ class TMDBDatabaseService:
                     'vote_count.gte': 10,  # Quality filter
                 }
                 
-                response = requests.get(url, params=params, timeout=10)
+                response = requests.get(url, params=params, timeout=15)
                 
-                if response.status_code != 200:
+                if response.status_code == 429:  # Rate limit
+                    print(f"  Rate limited, waiting 2s...")
+                    time.sleep(2)
+                    continue
+                elif response.status_code != 200:
                     print(f"  Error on page {page}: {response.status_code}")
+                    if response.status_code in [500, 502, 503, 504]:  # Server errors
+                        time.sleep(1)
+                        continue
                     break
                 
                 data = response.json()
@@ -109,9 +116,13 @@ class TMDBDatabaseService:
                     if len(movies) >= target:
                         return movies
                 
-                # Rate limiting
-                time.sleep(0.25)  # 4 requests per second max
+                # Rate limiting - slower to avoid connection issues
+                time.sleep(0.5)  # 2 requests per second to avoid connection reset
                 
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                print(f"  Connection error on page {page}: {e}")
+                time.sleep(2)  # Wait before retry
+                continue
             except Exception as e:
                 print(f"  Error fetching page {page}: {e}")
                 break

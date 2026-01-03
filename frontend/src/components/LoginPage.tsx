@@ -37,10 +37,10 @@ export default function LoginPage() {
             <Sparkles className="w-8 h-8 text-yellow-400 ml-2" />
           </div>
           <h1 className="text-4xl font-bold text-white mb-2">
-            AI Movie Recommendations
+            The Last Critic
           </h1>
           <p className="text-gray-300 text-lg">
-            Discover your next favorite movie with AI-powered insights
+            Your final word on what to watch
           </p>
         </div>
 

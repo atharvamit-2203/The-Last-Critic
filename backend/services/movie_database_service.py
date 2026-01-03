@@ -146,40 +146,170 @@ class MovieDatabaseService:
             raise
     
     def get_latest_movies(self, region: str = None, page: int = 1) -> List[Dict]:
-        """Get latest movies from multiple regions including India for diverse content"""
+        """Get movies released within the last 30 days from current date"""
+        from datetime import datetime, timedelta
+        
         all_movies = []
         seen_ids = set()
         
-        # Fetch from multiple regions to get diverse movies - prioritize Hindi/Indian
+        # Calculate 30-day window
+        current_date = datetime.now()
+        thirty_days_ago = current_date - timedelta(days=30)
+        
+        # Fetch from ALL major film industries worldwide - maximum counts
         regions_to_fetch = [
-            ('IN', 15),  # India - fetch more for regional coverage
-            ('US', 5),   # Hollywood
-            ('KR', 3),   # Korean
-            ('JP', 2),   # Japanese
+            ('IN', 50),  # India (Hindi, Telugu, Tamil, Malayalam, Kannada)
+            ('US', 30),  # Hollywood
+            ('KR', 15),  # Korean
+            ('JP', 10),  # Japanese
+            ('CN', 10),  # Chinese
+            ('FR', 8),   # French
+            ('DE', 8),   # German
+            ('ES', 8),   # Spanish
+            ('IT', 5),   # Italian
+            ('RU', 5),   # Russian
+            ('TH', 5),   # Thai
+            ('TR', 5),   # Turkish
+            ('BR', 5),   # Brazilian
         ]
         
         for region_code, count in regions_to_fetch:
             try:
-                movies = self._get_tmdb_latest_movies(region_code, page)
+                movies = self._get_tmdb_latest_movies_filtered(region_code, page, thirty_days_ago, current_date)
                 for movie in movies[:count]:
-                    if movie['id'] not in seen_ids:
-                        seen_ids.add(movie['id'])
+                    movie_id = movie['id']
+                    movie_title = movie['title'].lower().strip()
+                    
+                    # Check for both ID and title duplicates
+                    if movie_id not in seen_ids and not any(m['title'].lower().strip() == movie_title for m in all_movies):
+                        seen_ids.add(movie_id)
                         all_movies.append(movie)
             except Exception as e:
                 print(f"Error fetching from {region_code}: {e}")
                 continue
         
-        # If we don't have enough movies, add from fallback
-        if len(all_movies) < 15:
-            fallback = self._get_december_2025_fallback()
-            for movie in fallback:
-                if movie['id'] not in seen_ids and len(all_movies) < 25:
-                    seen_ids.add(movie['id'])
-                    all_movies.append(movie)
-        
-        return all_movies[:25]  # Return max 25 movies
+        # If we don't have enough movies from TMDB, return what we have
+        # Don't use fallback since those movies have already been released
+        return all_movies[:200]  # Increase limit to show up to 200 movies
     
-    def _get_tmdb_latest_movies(self, region: str = None, page: int = 1) -> List[Dict]:
+    def _get_tmdb_latest_movies_filtered(self, region: str = None, page: int = 1, start_date: datetime = None, end_date: datetime = None) -> List[Dict]:
+        """Get movies from TMDB within specific date range (last 30 days)"""
+        for attempt in range(3):
+            try:
+                # Format dates for TMDB API
+                start_date_str = start_date.strftime('%Y-%m-%d')
+                end_date_str = end_date.strftime('%Y-%m-%d')
+                
+                # Use discover endpoint to get movies within date range
+                discover_url = f"{self.tmdb_base_url}/discover/movie"
+                params = {
+                    'api_key': self.tmdb_api_key,
+                    'language': 'en-US',
+                    'page': page,
+                    'region': region or 'US',
+                    'sort_by': 'popularity.desc',
+                    'primary_release_date.gte': start_date_str,
+                    'primary_release_date.lte': end_date_str,
+                    'vote_count.gte': 0
+                }
+                
+                session = requests.Session()
+                session.headers.update({
+                    'User-Agent': 'MovieRecommendationApp/1.0',
+                    'Accept': 'application/json'
+                })
+                
+                # Try multiple pages to get more movies
+                movies = []
+                for page_num in [1, 2, 3, 4, 5]:  # Fetch 5 pages per region
+                    params['page'] = page_num
+                    response = session.get(discover_url, params=params, timeout=(5, 15))
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        
+                        for movie in data.get('results', []):
+                            # Detect industry based on original language
+                            original_language = movie.get('original_language', 'en')
+                            industry = self._detect_industry(original_language)
+                            
+                            movies.append({
+                                'id': movie.get('id'),
+                                'title': movie.get('title', 'Unknown'),
+                                'original_title': movie.get('original_title', movie.get('title', 'Unknown')),
+                                'description': movie.get('overview', 'No description available'),
+                                'rating': round(movie.get('vote_average', 0), 1),
+                                'year': movie.get('release_date', end_date.strftime('%Y-%m-%d'))[:4] if movie.get('release_date') else str(end_date.year),
+                                'genres': self._get_genre_names(movie.get('genre_ids', [])),
+                                'industry': industry,
+                                'popularity': int(movie.get('popularity', 1000)),
+                                'poster_url': f"https://image.tmdb.org/t/p/w500{movie.get('poster_path')}" if movie.get('poster_path') else None,
+                                'backdrop_url': f"https://image.tmdb.org/t/p/w1280{movie.get('backdrop_path')}" if movie.get('backdrop_path') else None
+                            })
+                    
+                    if len(movies) >= 100:  # Stop if we have enough
+                        break
+                    
+                    if movies:
+                        print(f"✓ Fetched {len(movies)} movies from {start_date_str} to {end_date_str}")
+                        return movies
+                
+            except Exception as e:
+                print(f"✗ TMDB attempt {attempt + 1} failed: {e}")
+                if attempt < 2:
+                    time.sleep(1 * (attempt + 1))
+                    continue
+        
+        return []
+    
+    def _detect_industry(self, original_language: str) -> str:
+        """Detect movie industry based on language"""
+        industry_map = {
+            'hi': 'Bollywood',
+            'te': 'Tollywood', 
+            'ta': 'Kollywood',
+            'ml': 'Mollywood',
+            'kn': 'Sandalwood',
+            'bn': 'Bengali Cinema',
+            'mr': 'Marathi Cinema',
+            'gu': 'Gujarati Cinema',
+            'pa': 'Punjabi Cinema',
+            'or': 'Odia Cinema',
+            'as': 'Assamese Cinema',
+            'ko': 'Korean Cinema',
+            'ja': 'Japanese Cinema',
+            'zh': 'Chinese Cinema',
+            'th': 'Thai Cinema',
+            'vi': 'Vietnamese Cinema',
+            'id': 'Indonesian Cinema',
+            'ms': 'Malaysian Cinema',
+            'tl': 'Filipino Cinema',
+            'es': 'Spanish Cinema',
+            'fr': 'French Cinema',
+            'de': 'German Cinema',
+            'it': 'Italian Cinema',
+            'pt': 'Portuguese Cinema',
+            'ru': 'Russian Cinema',
+            'ar': 'Arabic Cinema',
+            'tr': 'Turkish Cinema',
+            'fa': 'Persian Cinema'
+        }
+        return industry_map.get(original_language, 'Hollywood')
+    
+    def _get_recent_fallback(self, start_date: datetime, end_date: datetime) -> List[Dict]:
+        """Fallback movies for recent releases within the last 30 days (Dec 2025 - Jan 2026)"""
+        return [
+            {"id": 4001, "title": "Dhurandhar", "description": "A gripping drama about human relationships and moral choices", "rating": 7.8, "year": "2025", "genres": "Drama, Thriller", "industry": "Bollywood", "popularity": 8500},
+            {"id": 4002, "title": "Avatar: Fire and Ash", "description": "Jake Sully and his family face new threats on Pandora", "rating": 8.2, "year": "2025", "genres": "Sci-Fi, Adventure", "industry": "Hollywood", "popularity": 9500},
+            {"id": 4003, "title": "The Batman Part II", "description": "Batman continues his war on crime in Gotham City", "rating": 8.0, "year": "2025", "genres": "Action, Crime", "industry": "Hollywood", "popularity": 9200},
+            {"id": 4004, "title": "Fantastic Four", "description": "Marvel's first family joins the MCU", "rating": 7.5, "year": "2025", "genres": "Action, Sci-Fi", "industry": "Hollywood", "popularity": 8800},
+            {"id": 4005, "title": "Blade Runner 2099", "description": "The future of humanity hangs in the balance", "rating": 8.1, "year": "2025", "genres": "Sci-Fi, Thriller", "industry": "Hollywood", "popularity": 8600},
+            {"id": 4006, "title": "Salaar Part 2", "description": "The saga of Deva continues with more action and drama", "rating": 8.3, "year": "2025", "genres": "Action, Drama", "industry": "Tollywood", "popularity": 8900},
+            {"id": 4007, "title": "Bade Miyan Chote Miyan 2", "description": "The duo returns for another action-packed adventure", "rating": 6.9, "year": "2025", "genres": "Action, Comedy", "industry": "Bollywood", "popularity": 7800},
+            {"id": 4008, "title": "Thalapathy 69", "description": "Vijay's final film before entering politics", "rating": 8.4, "year": "2025", "genres": "Action, Drama", "industry": "Kollywood", "popularity": 9100},
+            {"id": 4009, "title": "Squid Game: The Movie", "description": "The deadly games come to the big screen", "rating": 8.2, "year": "2025", "genres": "Thriller, Drama", "industry": "Korean Cinema", "popularity": 9300},
+            {"id": 4010, "title": "Your Name 2", "description": "A new story of connection across time and space", "rating": 8.0, "year": "2025", "genres": "Animation, Romance", "industry": "Japanese Cinema", "popularity": 8400}
+        ]
         """Get latest movies from TMDB API - December 2025 releases"""
         for attempt in range(3):
             try:

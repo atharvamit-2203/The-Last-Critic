@@ -30,44 +30,24 @@ export const useAuth = () => useContext(AuthContext)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [signingIn, setSigningIn] = useState(false) // Prevent multiple popups
+  const [loading, setLoading] = useState(false) // Start with false to avoid unnecessary loading screen
+  const [signingIn, setSigningIn] = useState(false)
 
   useEffect(() => {
-    // Set a timeout to ensure loading doesn't hang forever
-    const loadingTimeout = setTimeout(() => {
-      if (loading) {
-        console.log('Auth loading timeout - forcing completion')
-        setLoading(false)
-      }
-    }, 3000) // 3 second timeout
-
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      clearTimeout(loadingTimeout) // Clear timeout if auth resolves
-      
+      console.log('Auth state changed:', user ? 'User found' : 'No user')
       if (user) {
+        console.log('✓ User restored from persistence:', user.email)
         await syncUserWithBackend(user)
-        console.log('✓ User authenticated:', user.email)
-        
-        // Check onboarding status
-        const onboardingStatus = localStorage.getItem(`onboarding_${user.uid}`)
-        if (onboardingStatus === 'true') {
-          console.log('✓ Onboarding already completed')
-        } else {
-          console.log('⚠ Onboarding not completed yet')
-        }
       } else {
-        console.log('No user authenticated')
+        console.log('No persisted user found')
       }
       setUser(user)
       setLoading(false)
-      setSigningIn(false) // Reset signing in state
+      setSigningIn(false)
     })
 
-    return () => {
-      clearTimeout(loadingTimeout)
-      unsubscribe()
-    }
+    return unsubscribe
   }, [])
 
   const syncUserWithBackend = async (user: User) => {
@@ -92,7 +72,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       setSigningIn(true)
+      console.log('Starting Google sign-in...')
+      
+      // Ensure Firebase is properly initialized
+      const { initializeAuth } = await import('@/lib/firebase')
+      await initializeAuth()
+      
       const result = await signInWithPopup(auth, googleProvider)
+      console.log('✓ Sign-in successful:', result.user.email)
       await syncUserWithBackend(result.user)
     } catch (error: any) {
       setSigningIn(false)

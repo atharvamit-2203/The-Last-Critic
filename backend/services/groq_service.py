@@ -16,7 +16,12 @@ class GroqService:
     def _call_groq(self, messages: List[Dict], max_tokens: int = 4000) -> str:
         cache_key = str(messages) + str(max_tokens)
         if cache_key in self.cache:
+            print("Using cached Groq response")
             return self.cache[cache_key]
+        
+        if not self.enabled:
+            print("Groq service not enabled - missing API key")
+            return ""
         
         try:
             headers = {
@@ -31,6 +36,7 @@ class GroqService:
                 "temperature": 0.7
             }
             
+            print(f"Calling Groq API with model: {self.model}")
             response = requests.post(
                 self.base_url,
                 headers=headers,
@@ -38,9 +44,12 @@ class GroqService:
                 timeout=30
             )
             
+            print(f"Groq API response status: {response.status_code}")
+            
             if response.status_code == 200:
                 result = response.json()
                 content = result['choices'][0]['message']['content'].strip()
+                print(f"Groq response length: {len(content)} characters")
                 self.cache[cache_key] = content
                 return content
             else:
@@ -52,93 +61,70 @@ class GroqService:
     
     def generate_movie_database(self, count: int = 100) -> List[Dict]:
         if not self.enabled:
+            print("Groq service not enabled")
             return []
         
-        # Don't use cache for movie generation
-        print(f"Starting generation of {count} movies...")
+        print(f"🎬 Starting Groq movie generation for {count} movies...")
         
-        # Generate in batches for better results
-        batch_size = min(300, count)  # Generate up to 300 at a time
+        # Start with smaller batch for testing
+        batch_size = min(50, count)
         all_movies = []
         seen_titles = set()
         
-        # Calculate number of batches needed
-        num_batches = (count + batch_size - 1) // batch_size
-        
-        for batch_num in range(num_batches):
-            remaining = count - len(all_movies)
-            current_batch_size = min(batch_size, remaining)
-            
-            if current_batch_size <= 0:
-                break
-                
-            print(f"Generating batch {batch_num + 1}/{num_batches} ({current_batch_size} movies)...")
-            
-            try:
-                prompt = f"""Generate {current_batch_size} UNIQUE popular and iconic movies from ALL film industries worldwide, with special focus on Indian cinema.
+        try:
+            prompt = f"""Generate {batch_size} popular movies from different industries and time periods.
 
 For EACH movie, provide in this EXACT format:
 
 MOVIE 1:
-Title: [Movie Title]
-Year: [Release Year 1900-2025]
-Rating: [5.0-9.5 based on actual ratings]
-Industry: [Bollywood/Tollywood/Kollywood/Mollywood/Sandalwood/Hollywood/Korean/etc]
-Genres: [Genre1, Genre2, Genre3]
-Description: [One sentence plot summary]
-Month: [Release month 1-12]
+Title: The Matrix
+Year: 1999
+Rating: 8.7
+Industry: Hollywood
+Genres: Action, Sci-Fi
+Description: A computer hacker learns about the true nature of reality
+Month: 3
 
-IMPORTANT - Include diverse representation:
-- Bollywood (Hindi cinema): 30% - Include classics from 1950s to 2025
-- Tollywood (Telugu cinema): 20% - Include from 1980s to 2025  
-- Kollywood (Tamil cinema): 15% - Include from 1970s to 2025
-- Mollywood (Malayalam cinema): 10% - Include quality films from all eras
-- Sandalwood (Kannada cinema): 10% - Include notable films
-- Hollywood: 10% - Major blockbusters and classics
-- Other (Korean, Japanese, European, etc): 5%
+MOVIE 2:
+Title: 3 Idiots
+Year: 2009
+Rating: 8.4
+Industry: Bollywood
+Genres: Comedy, Drama
+Description: Two friends search for their long lost companion
+Month: 12
 
-Cover ALL decades from 1900 to 2025. Include:
-- Legendary classics (1950s-1980s)
-- Popular hits (1990s-2000s)  
-- Modern blockbusters (2010s-2025)
-- Recent releases (2023-2025)
+Include diverse movies from:
+- Bollywood (Hindi cinema)
+- Hollywood blockbusters
+- Tollywood (Telugu cinema)
+- Korean cinema
+- Other international films
 
-Generate exactly {current_batch_size} UNIQUE movies with accurate real data. NO DUPLICATES."""
+Generate exactly {batch_size} movies with this exact format. Each movie must have all 7 fields."""
 
-                messages = [
-                    {"role": "system", "content": "You are a comprehensive movie database expert with knowledge of ALL world cinema."},
-                    {"role": "user", "content": prompt}
-                ]
+            messages = [
+                {"role": "system", "content": "You are a movie database expert. Generate movies in the exact format requested."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            print("Calling Groq API...")
+            response = self._call_groq(messages, max_tokens=6000)
+            
+            if response:
+                print(f"✅ Got response from Groq ({len(response)} chars)")
+                print(f"First 500 chars: {response[:500]}")
                 
-                response = self._call_groq(messages, max_tokens=8000)  # Increased for more movies
+                movies = self._parse_movies(response)
+                print(f"✅ Parsed {len(movies)} movies from Groq")
+                return movies
+            else:
+                print("❌ No response from Groq")
+                return []
                 
-                if response:
-                    print(f"\n{'='*60}")
-                    print(f"RAW GROQ RESPONSE (first 1000 chars):")
-                    print(response[:1000])
-                    print(f"{'='*60}\n")
-                    
-                    batch_movies = self._parse_movies(response)
-                    
-                    # Deduplicate across batches
-                    for movie in batch_movies:
-                        title_key = movie['title'].lower().strip()
-                        if title_key not in seen_titles:
-                            seen_titles.add(title_key)
-                            movie['id'] = len(all_movies) + 1  # Reassign ID
-                            all_movies.append(movie)
-                            
-                            if len(all_movies) >= count:
-                                break
-                    
-                    print(f"✓ Total movies collected: {len(all_movies)}/{count}")
-                    
-            except Exception as e:
-                print(f"Error generating batch: {e}")
-                break
-        
-        print(f"✓ Generated {len(all_movies)} unique movies from Groq")
-        return all_movies
+        except Exception as e:
+            print(f"❌ Error generating movies: {e}")
+            return []
     def _parse_movies(self, text: str) -> List[Dict]:
         movies = []
         seen_titles = set()  # Track unique titles

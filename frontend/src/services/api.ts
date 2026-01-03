@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { Movie, RecommendationRequest, RecommendationResponse } from '@/types'
+import { requestCache } from '@/utils/requestCache'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -12,12 +13,15 @@ const api = axios.create({
 })
 
 export const getMovies = async (limit: number = 100, search?: string): Promise<Movie[]> => {
-  const params = new URLSearchParams()
-  params.append('limit', limit.toString())
-  if (search) params.append('search', search)
-  
-  const response = await api.get<Movie[]>(`/api/movies?${params.toString()}`)
-  return response.data
+  const cacheKey = `movies_${limit}_${search || 'all'}`
+  return requestCache.get(cacheKey, async () => {
+    const params = new URLSearchParams()
+    params.append('limit', limit.toString())
+    if (search) params.append('search', search)
+    
+    const response = await api.get<Movie[]>(`/api/movies?${params.toString()}`)
+    return response.data
+  })
 }
 
 export const getMovieById = async (id: number): Promise<Movie> => {
@@ -43,21 +47,27 @@ export const chatWithAI = async (message: string): Promise<{ response: string }>
 }
 
 export const getLatestMovies = async (region?: string, page: number = 1): Promise<any> => {
-  const params = new URLSearchParams()
-  if (region) params.append('region', region)
-  params.append('page', page.toString())
-  
-  const response = await api.get(`/api/latest-movies?${params.toString()}`, {
-    timeout: 30000 // 30 second timeout for TMDB
-  })
-  return response.data
+  const cacheKey = `latest_${region || 'all'}_${page}`
+  return requestCache.get(cacheKey, async () => {
+    const params = new URLSearchParams()
+    if (region) params.append('region', region)
+    params.append('page', page.toString())
+    
+    const response = await api.get(`/api/latest-movies?${params.toString()}`, {
+      timeout: 30000
+    })
+    return response.data
+  }, 300000) // Cache for 5 minutes instead of 10
 }
 
 export const analyzeMovie = async (data: { movie_title: string; movie_year: string }): Promise<any> => {
-  const response = await api.post('/api/analyze-movie', data, {
-    timeout: 60000 // 60 seconds for fast analysis
-  })
-  return response.data
+  const cacheKey = `analysis_${data.movie_title}_${data.movie_year}`
+  return requestCache.get(cacheKey, async () => {
+    const response = await api.post('/api/analyze-movie', data, {
+      timeout: 90000
+    })
+    return response.data
+  }, 1800000) // Cache for 30 minutes
 }
 
 export const searchMoviesByPreferences = async (preferences: {

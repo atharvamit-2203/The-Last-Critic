@@ -7,10 +7,17 @@ import MovieCard from './MovieCard'
 
 interface RecommendationResultProps {
   recommendation: RecommendationResponse
+  onMovieSelect?: (movie: any) => void
 }
 
-export default function RecommendationResult({ recommendation }: RecommendationResultProps) {
+export default function RecommendationResult({ recommendation, onMovieSelect }: RecommendationResultProps) {
   const { should_watch, confidence, reason, recommended_movies, target_movie } = recommendation
+
+  const handleMovieSelect = (movie: any) => {
+    if (onMovieSelect) {
+      onMovieSelect(movie)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -57,7 +64,7 @@ export default function RecommendationResult({ recommendation }: RecommendationR
 
         <div className="bg-blue-500/20 border border-blue-500/30 rounded-lg p-4">
           <h3 className="text-white font-semibold mb-2">Analysis</h3>
-          <p className="text-gray-200">{reason}</p>
+          <p className="text-gray-200 whitespace-pre-wrap break-words">{reason}</p>
         </div>
       </div>
 
@@ -77,6 +84,9 @@ export default function RecommendationResult({ recommendation }: RecommendationR
                 key={movie.id} 
                 movie={movie} 
                 onClick={(m) => {
+                  // Learn from user interaction
+                  handleMovieSelect(m)
+                  
                   const modal = document.createElement('div')
                   modal.innerHTML = `
                     <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="this.remove()">

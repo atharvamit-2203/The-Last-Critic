@@ -32,18 +32,31 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'latest' | 'search'>('latest')
   const [preferenceSearchResults, setPreferenceSearchResults] = useState<Movie[]>([])
   const [isSearchingByPreferences, setIsSearchingByPreferences] = useState(false)
+  const [loadingStates, setLoadingStates] = useState({
+    movies: false,
+    latestMovies: false,
+    recommendations: false
+  })
 
   const loadMovies = async () => {
+    if (loadingStates.movies || movies.length > 0) return
+    
+    setLoadingStates(prev => ({ ...prev, movies: true }))
     try {
       const data = await getMovies()
       setMovies(data)
       setError(null)
     } catch (err) {
       console.error('Error loading movies:', err)
+    } finally {
+      setLoadingStates(prev => ({ ...prev, movies: false }))
     }
   }
 
   const loadLatestMovies = async () => {
+    if (loadingStates.latestMovies) return
+    
+    setLoadingStates(prev => ({ ...prev, latestMovies: true }))
     try {
       setError(null)
       const data = await getLatestMovies()
@@ -59,7 +72,7 @@ export default function Home() {
       // Auto-clear error after 5 seconds
       setTimeout(() => setError(null), 5000)
       
-      // Use fallback from our database
+      // Use fallback from our database immediately
       try {
         const fallbackMovies = await getMovies(25)
         setLatestMovies(fallbackMovies.map(m => ({
@@ -76,20 +89,15 @@ export default function Home() {
       } catch (fallbackErr) {
         console.error('Fallback also failed:', fallbackErr)
       }
+    } finally {
+      setLoadingStates(prev => ({ ...prev, latestMovies: false }))
     }
   }
 
-  // Load latest movies immediately on mount (before authentication)
+  // Load latest movies immediately on component mount
   useEffect(() => {
     loadLatestMovies()
   }, [])
-
-  // Ensure latest movies are loaded when switching to latest tab
-  useEffect(() => {
-    if (activeTab === 'latest' && latestMovies.length === 0) {
-      loadLatestMovies()
-    }
-  }, [activeTab])
 
   // Check onboarding status and load movies
   useEffect(() => {
@@ -101,6 +109,12 @@ export default function Home() {
       // Load recommendation movies if onboarding is complete
       if (isComplete) {
         loadMovies()
+        
+        // Clear cache and force fresh load of latest movies
+        const { requestCache } = require('@/utils/requestCache')
+        requestCache.clear('latest')
+        setLatestMovies([])
+        loadLatestMovies()
         
         // Load personalized recommendations from localStorage
         const savedRecommendations = localStorage.getItem(`recommendations_${user.uid}`)
@@ -175,8 +189,10 @@ export default function Home() {
         }
       }
       
-      // Reload latest movies to replace fallback data
-      loadLatestMovies()
+      // Reload latest movies to replace fallback data if needed
+      if (latestMovies.length === 0) {
+        loadLatestMovies()
+      }
     }
   }
 
@@ -206,6 +222,9 @@ export default function Home() {
     setSelectedMovie(movie)
     setError(null)
     setLoading(true)
+
+    // Learn from this selection
+    await learnFromUserInteraction(movie)
 
     try {
       const result = await getRecommendations({
@@ -272,6 +291,55 @@ export default function Home() {
     setSelectedLatestMovie(movie)
   }
 
+  const learnFromUserInteraction = async (movie: any) => {
+    if (!user) return
+    
+    try {
+      // Extract genres from the movie user clicked
+      const movieGenres = movie.genres.split(', ').map((g: string) => g.trim())
+      
+      // Update user preferences based on interaction
+      const updatedPreferences = { ...preferences }
+      
+      // Add new genres to favorites if not already there
+      movieGenres.forEach((genre: string) => {
+        if (!updatedPreferences.favorite_genres.includes(genre)) {
+          updatedPreferences.favorite_genres.push(genre)
+        }
+      })
+      
+      // Adjust rating preference based on movie rating
+      if (movie.rating > updatedPreferences.min_rating) {
+        updatedPreferences.min_rating = Math.max(
+          updatedPreferences.min_rating - 0.2, 
+          movie.rating - 1.0
+        )
+      }
+      
+      // Update decade preference towards the movie's decade
+      const movieDecade = Math.floor(movie.year / 10) * 10
+      updatedPreferences.preferred_decade = Math.round(
+        (updatedPreferences.preferred_decade + movieDecade) / 2
+      )
+      
+      setPreferences(updatedPreferences)
+      
+      // Save learned preferences
+      localStorage.setItem(`preferences_${user.uid}`, JSON.stringify(updatedPreferences))
+      
+      // Get new recommendations based on clicked movie
+      const result = await getRecommendations({
+        movie_title: movie.title,
+        user_preferences: updatedPreferences,
+        num_recommendations: 5
+      })
+      setRecommendation(result)
+      
+    } catch (err) {
+      console.error('Error learning from interaction:', err)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900">
       <Header />
@@ -308,13 +376,7 @@ export default function Home() {
         
         <div className="flex space-x-4 mb-8">
           <button
-            onClick={() => {
-              setActiveTab('latest')
-              // Ensure latest movies are loaded when switching to this tab
-              if (latestMovies.length === 0) {
-                loadLatestMovies()
-              }
-            }}
+            onClick={() => setActiveTab('latest')}
             className={`px-6 py-3 rounded-xl font-semibold transition-all ${
               activeTab === 'latest'
                 ? 'bg-blue-500 text-white shadow-lg'
@@ -326,10 +388,7 @@ export default function Home() {
           <button
             onClick={() => {
               setActiveTab('search')
-              // Ensure movies are loaded for search
-              if (movies.length === 0) {
-                loadMovies()
-              }
+              if (movies.length === 0) loadMovies()
             }}
             className={`px-6 py-3 rounded-xl font-semibold transition-all ${
               activeTab === 'search'
@@ -367,10 +426,14 @@ export default function Home() {
                 </div>
               )}
 
-              {latestMovies.length === 0 ? (
+              {loadingStates.latestMovies ? (
                 <div className="text-center py-12">
                   <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white mx-auto mb-4"></div>
                   <p className="text-white text-lg">Loading latest movies...</p>
+                </div>
+              ) : latestMovies.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-white text-lg">No movies available</p>
                 </div>
               ) : (
                 <MovieGrid
@@ -384,10 +447,14 @@ export default function Home() {
 
         {activeTab === 'search' && (
           <div className="space-y-8">
-            {movies.length === 0 ? (
+            {loadingStates.movies ? (
               <div className="bg-white/10 backdrop-blur-md rounded-xl p-12 text-center">
                 <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white mx-auto mb-4"></div>
                 <p className="text-white text-lg">Loading movie database...</p>
+              </div>
+            ) : movies.length === 0 ? (
+              <div className="bg-white/10 backdrop-blur-md rounded-xl p-12 text-center">
+                <p className="text-white text-lg">No movies available</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -468,7 +535,10 @@ export default function Home() {
                 )}
 
                 {!loading && recommendation && (
-                  <RecommendationResult recommendation={recommendation} />
+                  <RecommendationResult 
+                    recommendation={recommendation} 
+                    onMovieSelect={handleMovieSelect}
+                  />
                 )}
 
                 {!loading && !recommendation && !error && (

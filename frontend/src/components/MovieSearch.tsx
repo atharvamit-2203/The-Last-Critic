@@ -40,7 +40,7 @@ export default function MovieSearch({ movies, onMovieSelect, selectedMovie }: Mo
               setSearchTerm(e.target.value)
               setShowResults(true)
             }}
-            onFocus={() => setShowResults(true)}
+            onBlur={() => setTimeout(() => setShowResults(false), 200)}
             placeholder="Search for a movie..."
             className="w-full pl-10 pr-4 py-3 bg-white/20 border border-white/30 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />

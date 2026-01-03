@@ -20,6 +20,7 @@ from models.movie import MovieResponse, RecommendationRequest, RecommendationRes
 recommendation_engine = RecommendationEngine()
 firebase_service = None  # Initialize lazily to avoid blocking startup
 is_model_ready = False
+api_cache = {}  # Simple in-memory cache
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -99,8 +100,13 @@ async def get_movies(
     """
     Get list of available movies
     """
+    cache_key = f"movies_{limit}_{search or 'all'}"
+    if cache_key in api_cache:
+        return api_cache[cache_key]
+    
     try:
         movies = recommendation_engine.get_movies(limit=limit, search=search)
+        api_cache[cache_key] = movies
         return movies
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -141,10 +147,16 @@ async def get_latest_movies(region: Optional[str] = None, page: int = 1):
     """
     Get latest movies from TMDB API
     """
+    cache_key = f"latest_{region or 'all'}_{page}"
+    if cache_key in api_cache:
+        return api_cache[cache_key]
+    
     try:
         movie_db_service = MovieDatabaseService()
         movies = movie_db_service.get_latest_movies(region=region, page=page)
-        return {"movies": movies, "total": len(movies)}
+        result = {"movies": movies, "total": len(movies)}
+        api_cache[cache_key] = result
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

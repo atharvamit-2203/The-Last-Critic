@@ -31,7 +31,6 @@ export default function Header() {
           <div className="flex items-center space-x-6">
             <div className="hidden md:flex items-center space-x-6 text-gray-300">
               <span className="text-sm">🎬 Content-Based Filtering</span>
-              <span className="text-sm">🤖 TF-IDF • Cosine Similarity</span>
               <span className="text-sm">✨ Your Final Word</span>
             </div>
             

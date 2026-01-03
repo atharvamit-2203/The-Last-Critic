@@ -18,42 +18,53 @@ class RecommendationEngine:
         self.movie_db_service = None
     
     def load_data(self):
-        """Load movie dataset using TMDB (preferred) or Groq (fallback)"""
+        """Load movie dataset using both TMDB and Groq for maximum coverage"""
+        all_movies = []
+        
         try:
-            # Try TMDB first (most reliable)
+            # Try TMDB first
             from services.tmdb_database_service import TMDBDatabaseService
             tmdb_service = TMDBDatabaseService()
             
             if tmdb_service.enabled:
-                print("Attempting to generate 1200 movies from TMDB...")
-                movies = tmdb_service.generate_movie_database(1200)
-                if movies and len(movies) >= 500:  # TMDB should reliably get 500+
-                    self.movies_df = pd.DataFrame(movies)
-                    print(f"✓ Generated {len(self.movies_df)} movies using TMDB")
-                    self.prepare_features()
-                    return
-                else:
-                    print(f"⚠ TMDB returned only {len(movies)} movies, trying Groq...")
+                print("🎬 Getting movies from TMDB...")
+                tmdb_movies = tmdb_service.generate_movie_database(1500)
+                if tmdb_movies:
+                    all_movies.extend(tmdb_movies)
+                    print(f"✅ TMDB: {len(tmdb_movies)} movies")
             
-            # Fallback to Groq if TMDB unavailable or insufficient
+            # Add Groq movies
             from services.groq_service import GroqService
             groq_service = GroqService()
             
             if groq_service.enabled:
-                print("Attempting to generate 1200 movies from Groq...")
-                movies = groq_service.generate_movie_database(1200)
-                if movies and len(movies) >= 100:
-                    self.movies_df = pd.DataFrame(movies)
-                    print(f"✓ Generated {len(self.movies_df)} movies using Groq")
-                    self.prepare_features()
-                    return
-                else:
-                    print(f"⚠ Groq returned only {len(movies) if movies else 0} movies, using expanded sample")
+                print("🤖 Getting movies from Groq...")
+                groq_movies = groq_service.generate_movie_database(1500)
+                if groq_movies:
+                    all_movies.extend(groq_movies)
+                    print(f"✅ Groq: {len(groq_movies)} movies")
             
+            # Deduplicate by title
+            if all_movies:
+                seen_titles = set()
+                unique_movies = []
+                for movie in all_movies:
+                    title_key = movie['title'].lower().strip()
+                    if title_key not in seen_titles:
+                        seen_titles.add(title_key)
+                        movie['id'] = len(unique_movies) + 1
+                        unique_movies.append(movie)
+                
+                self.movies_df = pd.DataFrame(unique_movies)
+                print(f"🎯 Total unique movies: {len(self.movies_df)}")
+                return
+            
+            # Fallback to sample dataset
+            print("⚠️ No movies from APIs, using sample dataset")
             self.create_sample_dataset()
-            print(f"✓ Using expanded sample dataset with {len(self.movies_df)} movies")
+            
         except Exception as e:
-            print(f"Error loading data: {e}")
+            print(f"❌ Error loading data: {e}")
             self.create_sample_dataset()
     
     def create_sample_dataset(self):
@@ -91,6 +102,28 @@ class RecommendationEngine:
             {"id": 28, "title": "Swades", "genres": "Drama", "description": "NASA scientist returns to reconnect with his roots", "rating": 8.2, "year": 2004, "release_month": 12},
             {"id": 29, "title": "Rang De Basanti", "genres": "Comedy, Drama, History", "description": "Students become activists after reenacting revolutionaries", "rating": 8.1, "year": 2006, "release_month": 1},
             {"id": 30, "title": "Barfi!", "genres": "Comedy, Drama, Romance", "description": "Deaf-mute man finds love in unexpected ways", "rating": 8.1, "year": 2012, "release_month": 9},
+            
+            # Horror Movies (2000s era)
+            {"id": 56, "title": "The Ring", "genres": "Horror, Mystery", "description": "Cursed videotape kills viewers in seven days", "rating": 7.1, "year": 2002, "release_month": 10},
+            {"id": 57, "title": "The Grudge", "genres": "Horror, Mystery", "description": "Curse spreads to anyone who enters haunted house", "rating": 5.9, "year": 2004, "release_month": 10},
+            {"id": 58, "title": "Saw", "genres": "Horror, Mystery, Thriller", "description": "Two men trapped in bathroom by serial killer", "rating": 7.6, "year": 2004, "release_month": 10},
+            {"id": 59, "title": "The Descent", "genres": "Adventure, Horror, Thriller", "description": "Women encounter creatures in underground cave", "rating": 7.2, "year": 2005, "release_month": 7},
+            {"id": 60, "title": "28 Days Later", "genres": "Drama, Horror, Sci-Fi", "description": "Rage virus turns people into zombies", "rating": 7.6, "year": 2002, "release_month": 6},
+            {"id": 61, "title": "Dawn of the Dead", "genres": "Action, Horror", "description": "Survivors trapped in mall during zombie outbreak", "rating": 7.3, "year": 2004, "release_month": 3},
+            {"id": 62, "title": "Shaun of the Dead", "genres": "Comedy, Horror", "description": "Slacker fights zombies to save girlfriend", "rating": 7.9, "year": 2004, "release_month": 9},
+            {"id": 63, "title": "The Others", "genres": "Horror, Mystery, Thriller", "description": "Mother and children experience supernatural events", "rating": 7.6, "year": 2001, "release_month": 8},
+            {"id": 64, "title": "Signs", "genres": "Drama, Horror, Mystery", "description": "Farmer discovers crop circles and alien invasion", "rating": 6.7, "year": 2002, "release_month": 8},
+            {"id": 65, "title": "The Sixth Sense", "genres": "Drama, Horror, Mystery", "description": "Boy sees dead people, psychologist helps him", "rating": 8.2, "year": 1999, "release_month": 8},
+            {"id": 66, "title": "Final Destination", "genres": "Horror, Thriller", "description": "Teenagers cheat death but it comes back for them", "rating": 6.7, "year": 2000, "release_month": 3},
+            {"id": 67, "title": "Scream 3", "genres": "Horror, Mystery", "description": "Ghostface killer returns for movie trilogy finale", "rating": 5.6, "year": 2000, "release_month": 2},
+            {"id": 68, "title": "What Lies Beneath", "genres": "Drama, Horror, Mystery", "description": "Wife discovers husband's dark secrets through supernatural events", "rating": 6.6, "year": 2000, "release_month": 7},
+            {"id": 69, "title": "The Blair Witch Project", "genres": "Horror, Mystery", "description": "Students disappear while filming documentary about witch", "rating": 6.5, "year": 1999, "release_month": 7},
+            {"id": 70, "title": "Jeepers Creepers", "genres": "Horror, Mystery", "description": "Siblings encounter ancient creature that feeds every 23 years", "rating": 6.2, "year": 2001, "release_month": 8},
+            {"id": 71, "title": "The Texas Chain Saw Massacre", "genres": "Horror", "description": "Remake of classic slasher about cannibal family", "rating": 6.2, "year": 2003, "release_month": 10},
+            {"id": 72, "title": "House of 1000 Corpses", "genres": "Horror", "description": "Travelers encounter sadistic family of killers", "rating": 6.1, "year": 2003, "release_month": 4},
+            {"id": 73, "title": "Cabin Fever", "genres": "Horror", "description": "College students infected by flesh-eating virus", "rating": 5.6, "year": 2002, "release_month": 9},
+            {"id": 74, "title": "Wrong Turn", "genres": "Horror, Thriller", "description": "Friends encounter cannibal mountain men in West Virginia", "rating": 6.1, "year": 2003, "release_month": 5},
+            {"id": 75, "title": "Darkness Falls", "genres": "Fantasy, Horror, Mystery", "description": "Tooth fairy legend becomes deadly reality", "rating": 5.0, "year": 2003, "release_month": 1},
             
             # Tollywood (Telugu)
             {"id": 31, "title": "Eega", "genres": "Action, Fantasy, Romance", "description": "Man reincarnates as fly to get revenge", "rating": 7.7, "year": 2012, "release_month": 7},
@@ -181,33 +214,95 @@ class RecommendationEngine:
             return matches.index[0]
         return None
     
-    def get_movies(self, limit: int = 100, search: Optional[str] = None) -> List[Dict]:
-        """Get all movies for search/recommend functionality"""
+    def get_movies(self, limit: int = 100, search: Optional[str] = None) -> List[MovieResponse]:
+        """Get all movies for search/recommend functionality with priority on recent releases"""
         if self.movies_df is None:
             return []
-        
-        # Include ALL movies regardless of release date
-        filtered_df = self.movies_df.copy()
-        
+
+        from datetime import datetime
+
+        # Get current date and calculate last month date range
+        current_date = datetime.now()
+        current_year = current_date.year
+        current_month = current_date.month
+        current_day = current_date.day
+
+        # Calculate date one month ago
+        if current_month == 1:
+            last_month_year = current_year - 1
+            last_month_month = 12
+        else:
+            last_month_year = current_year
+            last_month_month = current_month - 1
+
+        last_month_day = current_day  # Same day of previous month
+
+        # Filter movies from last month onwards
+        recent_movies_df = self.movies_df[
+            ((self.movies_df['year'] == current_year) & (self.movies_df['release_month'] >= last_month_month)) |
+            ((self.movies_df['year'] == last_month_year) & (self.movies_df['release_month'] >= last_month_month) & (self.movies_df['release_month'] <= 12)) |
+            (self.movies_df['year'] > current_year)
+        ].copy()
+
+        # For movies in the current year and last month, check day if month matches
+        if current_month == last_month_month + 1 or (current_month == 1 and last_month_month == 12):
+            # More precise filtering for exact month boundary
+            recent_condition = (
+                (self.movies_df['year'] == current_year) |
+                ((self.movies_df['year'] == last_month_year) & (self.movies_df['release_month'] >= last_month_month))
+            )
+            recent_movies_df = self.movies_df[recent_condition].copy()
+
+        # Get older movies (before last month)
+        older_movies_df = self.movies_df[
+            ~self.movies_df.index.isin(recent_movies_df.index)
+        ].copy()
+
+        # Apply search filter if provided
         if search:
             search_lower = search.lower()
-            filtered_df = filtered_df[
-                filtered_df['title'].str.lower().str.contains(search_lower, na=False) |
-                filtered_df['genres'].str.lower().str.contains(search_lower, na=False)
-            ]
-        
+            
+            # Create search condition for recent movies
+            recent_search_condition = (
+                recent_movies_df['title'].str.lower().str.contains(search_lower, na=False) |
+                recent_movies_df['genres'].str.lower().str.contains(search_lower, na=False)
+            )
+            recent_movies_df = recent_movies_df.loc[recent_search_condition]
+            
+            # Create search condition for older movies
+            older_search_condition = (
+                older_movies_df['title'].str.lower().str.contains(search_lower, na=False) |
+                older_movies_df['genres'].str.lower().str.contains(search_lower, na=False)
+            )
+            older_movies_df = older_movies_df.loc[older_search_condition]
+
+        # Sort recent movies by release date (newest first)
+        recent_movies_df = recent_movies_df.sort_values(
+            by=['year', 'release_month'],
+            ascending=[False, False]
+        )
+
+        # Sort older movies by rating (highest first) for variety
+        older_movies_df = older_movies_df.sort_values(
+            by=['rating'],
+            ascending=[False]
+        )
+
+        # Combine recent movies first, then older movies
+        combined_df = pd.concat([recent_movies_df, older_movies_df])
+
         movies = []
-        for _, movie in filtered_df.head(limit).iterrows():
-            movies.append({
-                'id': int(movie['id']),
-                'title': movie['title'],
-                'genres': movie['genres'],
-                'description': movie['description'],
-                'rating': float(movie['rating']),
-                'year': int(movie['year']),
-                'release_month': int(movie['release_month']) if pd.notna(movie['release_month']) else None
-            })
-        
+        for _, movie in combined_df.head(limit).iterrows():
+            movies.append(MovieResponse(
+                id=int(movie['id']),
+                title=movie['title'],
+                genres=movie['genres'],
+                description=movie['description'],
+                rating=float(movie['rating']),
+                year=int(movie['year']),
+                release_month=int(movie['release_month']) if pd.notna(movie['release_month']) else None
+            ))
+
         return movies
     
     def search_by_preferences(
@@ -217,28 +312,53 @@ class RecommendationEngine:
         preferred_decade: int,
         limit: int = 20
     ) -> List[Dict]:
-        """Search movies that match user preferences"""
+        """Search movies that match user preferences with flexible matching"""
         if self.movies_df is None:
             return []
         
         filtered_df = self.movies_df.copy()
         
-        # Filter by minimum rating
-        filtered_df = filtered_df[filtered_df['rating'] >= min_rating]
-        
-        # Filter by genres if specified
+        # Start with genre filtering if specified
         if favorite_genres:
             genre_pattern = '|'.join(favorite_genres)
-            filtered_df = filtered_df[
+            genre_matches = filtered_df[
                 filtered_df['genres'].str.contains(genre_pattern, case=False, na=False)
             ]
+            
+            # If we have genre matches, use them
+            if len(genre_matches) > 0:
+                filtered_df = genre_matches
+            else:
+                # If no exact genre matches, be more flexible
+                print(f"No exact matches for {favorite_genres}, showing related movies")
         
-        # Filter by decade (within 10 years of preferred decade)
+        # Apply rating filter with flexibility
+        exact_rating_matches = filtered_df[filtered_df['rating'] >= min_rating]
+        if len(exact_rating_matches) >= 5:
+            filtered_df = exact_rating_matches
+        else:
+            # If too few high-rated matches, lower the threshold slightly
+            relaxed_rating = max(min_rating - 1.0, 5.0)
+            filtered_df = filtered_df[filtered_df['rating'] >= relaxed_rating]
+            print(f"Relaxed rating from {min_rating} to {relaxed_rating} for more results")
+        
+        # Apply decade filter with flexibility
         decade_start = preferred_decade - 5
-        decade_end = preferred_decade + 14  # Include the full decade plus adjacent years
-        filtered_df = filtered_df[
+        decade_end = preferred_decade + 14
+        decade_matches = filtered_df[
             (filtered_df['year'] >= decade_start) & (filtered_df['year'] <= decade_end)
         ]
+        
+        if len(decade_matches) >= 3:
+            filtered_df = decade_matches
+        else:
+            # If too few decade matches, expand the range
+            expanded_start = preferred_decade - 15
+            expanded_end = preferred_decade + 25
+            filtered_df = filtered_df[
+                (filtered_df['year'] >= expanded_start) & (filtered_df['year'] <= expanded_end)
+            ]
+            print(f"Expanded decade range for more results")
         
         # Sort by rating (highest first) and then by year (newest first)
         filtered_df = filtered_df.sort_values(
@@ -260,23 +380,23 @@ class RecommendationEngine:
         
         return movies
     
-    def get_movie_by_id(self, movie_id: int) -> Optional[Dict]:
+    def get_movie_by_id(self, movie_id: int) -> Optional[MovieResponse]:
         """Get a specific movie by ID"""
         if self.movies_df is None:
             return None
-        
+
         matches = self.movies_df[self.movies_df['id'] == movie_id]
         if len(matches) > 0:
             movie = matches.iloc[0]
-            return {
-                'id': int(movie['id']),
-                'title': movie['title'],
-                'genres': movie['genres'],
-                'description': movie['description'],
-                'rating': float(movie['rating']),
-                'year': int(movie['year']),
-                'release_month': int(movie['release_month']) if pd.notna(movie['release_month']) else None
-            }
+            return MovieResponse(
+                id=int(movie['id']),
+                title=movie['title'],
+                genres=movie['genres'],
+                description=movie['description'],
+                rating=float(movie['rating']),
+                year=int(movie['year']),
+                release_month=int(movie['release_month']) if pd.notna(movie['release_month']) else None
+            )
         return None
     
     def recommend(
@@ -306,9 +426,10 @@ class RecommendationEngine:
         sim_scores = list(enumerate(self.cosine_sim[movie_idx]))
         sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
         
-        # Get recommended movie indices (deduplicated by movie ID)
+        # Get recommended movie indices (deduplicated by movie ID and title)
         recommended_movies = []
         seen_ids = {int(target_movie['id'])}  # Track seen IDs, exclude target movie
+        seen_titles = {target_movie['title'].lower().strip()}  # Track seen titles
         
         for idx, score in sim_scores[1:]:  # Skip first item (the movie itself)
             if len(recommended_movies) >= num_recommendations:
@@ -316,12 +437,14 @@ class RecommendationEngine:
                 
             movie = self.movies_df.iloc[idx]
             movie_id = int(movie['id'])
+            movie_title = movie['title'].lower().strip()
             
-            # Skip if we've already added this movie
-            if movie_id in seen_ids:
+            # Skip if we've already added this movie by ID or title
+            if movie_id in seen_ids or movie_title in seen_titles:
                 continue
                 
             seen_ids.add(movie_id)
+            seen_titles.add(movie_title)
             
             # Generate reason for this recommendation
             reason = self._generate_recommendation_reason(
@@ -488,82 +611,8 @@ class RecommendationEngine:
         else:
             return "Recommended based on content similarity"
     
-    def get_movies(self, limit: int = 100, search: Optional[str] = None) -> List[MovieResponse]:
-        """Get list of movies - exclude current month movies, search in CSV first, then use AI for any movie"""
-        from datetime import datetime
 
-        current_date = datetime.now()
-        current_year = current_date.year
-        current_month = current_date.month
 
-        # Filter out movies from current month
-        filtered_df = self.movies_df[
-            ~((self.movies_df['year'] == current_year) & (self.movies_df['release_month'] == current_month))
-        ]
-
-        if not search:
-            # Return all movies from filtered CSV if no search
-            df = filtered_df.head(limit)
-            movies = []
-            for _, movie in df.iterrows():
-                movies.append(MovieResponse(
-                    id=int(movie['id']),
-                    title=movie['title'],
-                    genres=movie['genres'],
-                    description=movie['description'],
-                    rating=float(movie['rating']),
-                    year=int(movie['year']),
-                    release_month=int(movie['release_month']) if pd.notna(movie['release_month']) else None
-                ))
-            return movies
-
-        # Search in filtered CSV first
-        df = filtered_df[
-            filtered_df['title'].str.contains(search, case=False, na=False) |
-            filtered_df['genres'].str.contains(search, case=False, na=False)
-        ].head(limit)
-
-        # If found in CSV, return those
-        if len(df) > 0:
-            movies = []
-            for _, movie in df.iterrows():
-                movies.append(MovieResponse(
-                    id=int(movie['id']),
-                    title=movie['title'],
-                    genres=movie['genres'],
-                    description=movie['description'],
-                    rating=float(movie['rating']),
-                    year=int(movie['year']),
-                    release_month=int(movie['release_month']) if pd.notna(movie['release_month']) else None
-                ))
-            return movies
-
-        # Not found in CSV - use AI to search for the movie
-        if self.ai_service.enabled:
-            try:
-                ai_movies = self.ai_service.search_movie_by_title(search)
-                return ai_movies
-            except:
-                pass
-
-        return []
-    
-    def get_movie_by_id(self, movie_id: int) -> Optional[MovieResponse]:
-        """Get a specific movie by ID"""
-        movie_data = self.movies_df[self.movies_df['id'] == movie_id]
-        
-        if len(movie_data) == 0:
-            return None
-        
-        movie = movie_data.iloc[0]
-        return MovieResponse(
-            id=int(movie['id']),
-            title=movie['title'],
-            genres=movie['genres'],
-            description=movie['description'],
-            rating=float(movie['rating']),
-            year=int(movie['year'])
-        )
     def _generate_movie_database(self) -> List[Dict]:
         """Generate comprehensive movie database using AI"""
         if not self.movie_db_service or not self.movie_db_service.enabled:

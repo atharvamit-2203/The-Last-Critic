@@ -27,34 +27,53 @@ export default function MovieDetailModal({ movie, onClose }: MovieDetailModalPro
   const [analysis, setAnalysis] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
-  const [hasLoaded, setHasLoaded] = useState(false)
+  const [analysisStarted, setAnalysisStarted] = useState(false)
 
   React.useEffect(() => {
-    // Only load once per movie
-    if (!hasLoaded) {
+    // Start analysis immediately when modal opens
+    if (!analysisStarted) {
+      setAnalysisStarted(true)
       loadAnalysis()
     }
-  }, [movie.id]) // Use movie.id instead of movie object
+  }, [movie.id])
 
   const loadAnalysis = async () => {
-    if (loading) return // Prevent multiple simultaneous calls
+    if (loading) return
     
     setLoading(true)
-    setHasLoaded(false)
+    const startTime = Date.now()
+    
     try {
-      const result = await analyzeMovie({
+      // Set 90-second timeout
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Analysis timeout - taking too long')), 90000)
+      )
+      
+      const analysisPromise = analyzeMovie({
         movie_title: movie.title,
         movie_year: movie.year
       })
-      console.log('Analysis result:', result)
+      
+      const result = await Promise.race([analysisPromise, timeoutPromise])
+      const duration = (Date.now() - startTime) / 1000
+      
+      console.log(`Analysis completed in ${duration.toFixed(1)}s`)
       setAnalysis(result)
-      setHasLoaded(true)
-    } catch (error) {
-      console.error('Error analyzing movie:', error)
-      setAnalysis({
-        error: true,
-        message: 'Failed to load analysis. Please check if the backend is running and Ollama is available.'
-      })
+    } catch (error: any) {
+      const duration = (Date.now() - startTime) / 1000
+      console.error(`Analysis failed after ${duration.toFixed(1)}s:`, error)
+      
+      if (error.message?.includes('timeout')) {
+        setAnalysis({
+          error: true,
+          message: `Analysis timed out after ${duration.toFixed(0)} seconds. The AI service may be overloaded. Please try again later.`
+        })
+      } else {
+        setAnalysis({
+          error: true,
+          message: 'Analysis failed. Please ensure Ollama is running with llama3.2 model, then try again.'
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -76,7 +95,8 @@ export default function MovieDetailModal({ movie, onClose }: MovieDetailModalPro
           )}
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition-colors"
+            className="absolute top-4 right-4 bg-black/70 hover:bg-black/90 text-white p-2 rounded-full transition-colors z-10"
+            disabled={false}
           >
             <X className="w-6 h-6" />
           </button>
@@ -143,18 +163,27 @@ export default function MovieDetailModal({ movie, onClose }: MovieDetailModalPro
             </div>
 
             {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
+                <p className="text-white text-lg mb-2">Analyzing movie reviews...</p>
+                <p className="text-gray-400 text-sm">This may take up to 90 seconds</p>
+                <div className="mt-4 w-64 bg-gray-700 rounded-full h-2">
+                  <div className="bg-blue-500 h-2 rounded-full animate-pulse" style={{width: '30%'}}></div>
+                </div>
               </div>
             ) : analysis ? (
               analysis.error ? (
                 <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-6">
                   <p className="text-red-300">{analysis.message || 'Unable to load analysis'}</p>
                   <button
-                    onClick={loadAnalysis}
+                    onClick={() => {
+                      setAnalysisStarted(false)
+                      setAnalysis(null)
+                      loadAnalysis()
+                    }}
                     className="mt-4 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors text-sm"
                   >
-                    Retry
+                    Retry Analysis
                   </button>
                 </div>
               ) : (
