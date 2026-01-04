@@ -81,3 +81,4 @@ client_secret_*.json
 
 # Visual Studio
 .vs/
+.vercel
