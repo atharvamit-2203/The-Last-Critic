@@ -37,18 +37,25 @@ async def lifespan(app: FastAPI):
         print(f"✗ Firebase initialization failed: {e}")
         print("App will continue without Firebase features")
     
-    # Start ML model training in background
-    print("Loading movie data and training model in background...")
-    try:
-        recommendation_engine.load_data()
-        print("✓ Movie data loaded")
-        recommendation_engine.train_model()
-        print("✓ ML model trained")
-        is_model_ready = True
-    except Exception as e:
-        print(f"✗ Model training failed: {e}")
-    
     print("✓ Application startup complete!")
+    
+    # Start ML model training in background (non-blocking)
+    import threading
+    def load_model_background():
+        global is_model_ready
+        try:
+            print("Loading movie data and training model in background...")
+            recommendation_engine.load_data()
+            print("✓ Movie data loaded")
+            recommendation_engine.train_model()
+            print("✓ ML model trained")
+            is_model_ready = True
+            print("✓ Application startup complete!")
+        except Exception as e:
+            print(f"✗ Model training failed: {e}")
+    
+    threading.Thread(target=load_model_background, daemon=True).start()
+    
     yield
 
 app = FastAPI(
@@ -81,16 +88,65 @@ async def get_recommendation(request: RecommendationRequest):
     Get movie recommendation based on user preferences
     """
     if not is_model_ready:
-        raise HTTPException(status_code=503, detail="Model is still loading, please try again in a moment")
+        # Return a simple response while model is loading
+        return RecommendationResponse(
+            should_watch=True,
+            confidence=75.0,
+            reason="Model is still loading. This is a basic recommendation based on your preferences.",
+            recommended_movies=[],
+            target_movie=None
+        )
+    
+    # Cache recommendations to prevent rate limiting loops
+    cache_key = f"rec_{request.movie_title}_{hash(str(request.user_preferences))}_{request.num_recommendations}"
+    if cache_key in api_cache:
+        return api_cache[cache_key]
+    
     try:
         recommendation = recommendation_engine.recommend(
             movie_title=request.movie_title,
             user_preferences=request.user_preferences,
             num_recommendations=request.num_recommendations
         )
+        api_cache[cache_key] = recommendation
         return recommendation
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/all-movies", response_model=List[MovieResponse])
+async def get_all_movies(
+    limit: int = 100,
+    search: Optional[str] = None
+):
+    """
+    Get all movies without date filtering (for onboarding and search)
+    """
+    cache_key = f"all_movies_{limit}_{search or 'all'}"
+    if cache_key in api_cache:
+        return api_cache[cache_key]
+    
+    try:
+        movies = recommendation_engine.get_all_movies(limit=limit, search=search)
+        api_cache[cache_key] = movies
+        return movies
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/date-range")
+async def get_current_date_range():
+    """
+    Get the current date range being used for movie filtering
+    """
+    from datetime import datetime, timedelta
+    
+    current_date = datetime.now()
+    one_month_ago = current_date - timedelta(days=31)
+    
+    return {
+        "current_date": current_date.strftime("%Y-%m-%d"),
+        "one_month_ago": one_month_ago.strftime("%Y-%m-%d"),
+        "description": f"Showing movies from {one_month_ago.strftime('%B %d, %Y')} to {current_date.strftime('%B %d, %Y')}"
+    }
 
 @app.get("/api/movies", response_model=List[MovieResponse])
 async def get_movies(
@@ -98,7 +154,7 @@ async def get_movies(
     search: Optional[str] = None
 ):
     """
-    Get list of available movies
+    Get movies from comprehensive database (all movies for search/recommendations)
     """
     cache_key = f"movies_{limit}_{search or 'all'}"
     if cache_key in api_cache:
@@ -143,21 +199,30 @@ async def get_movie(movie_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/latest-movies")
-async def get_latest_movies(region: Optional[str] = None, page: int = 1):
+async def get_latest_movies(region: Optional[str] = None, page: int = 1, limit: int = 100):
     """
-    Get latest movies from TMDB API
+    Get latest movies from TMDB (last 30 days only)
     """
-    cache_key = f"latest_{region or 'all'}_{page}"
-    if cache_key in api_cache:
-        return api_cache[cache_key]
-    
     try:
-        movie_db_service = MovieDatabaseService()
-        movies = movie_db_service.get_latest_movies(region=region, page=page)
-        result = {"movies": movies, "total": len(movies)}
-        api_cache[cache_key] = result
-        return result
+        latest_movies = recommendation_engine.get_latest_movies(limit=limit)
+        
+        if not latest_movies:
+            return {"movies": [], "total": 0}
+        
+        return {"movies": [{
+            "id": movie.get('id'),
+            "title": movie.get('title'),
+            "description": movie.get('description', ''),
+            "rating": movie.get('rating', 7.0),
+            "year": str(movie.get('year', 2026)),
+            "genres": movie.get('genres', ''),
+            "industry": movie.get('industry', 'International'),
+            "popularity": 9000,
+            "poster_url": movie.get('poster_url'),
+            "language": movie.get('language', 'English')
+        } for movie in latest_movies], "total": len(latest_movies)}
     except Exception as e:
+        print(f"Error in latest-movies endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analyze-movie")
@@ -308,6 +373,32 @@ async def remove_favorite(user_id: str, movie_id: str):
     try:
         result = firebase_service.remove_from_favorites(user_id, movie_id)
         return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/auth/user/{user_id}/recommendations")
+async def add_recommendation(user_id: str, recommendation_data: dict):
+    """
+    Add movie to user's recommendations
+    """
+    if not firebase_service:
+        raise HTTPException(status_code=503, detail="Firebase service not available")
+    try:
+        result = firebase_service.add_recommendation(user_id, recommendation_data)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/auth/user/{user_id}/recommendations")
+async def get_recommendations(user_id: str):
+    """
+    Get user's recommended movies
+    """
+    if not firebase_service:
+        raise HTTPException(status_code=503, detail="Firebase service not available")
+    try:
+        recommendations = firebase_service.get_user_recommendations(user_id)
+        return {"recommendations": recommendations}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

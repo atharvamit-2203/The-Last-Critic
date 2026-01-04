@@ -184,13 +184,20 @@ class MovieDatabaseService:
                     if movie_id not in seen_ids and not any(m['title'].lower().strip() == movie_title for m in all_movies):
                         seen_ids.add(movie_id)
                         all_movies.append(movie)
+                        
+                        # Stop if we have enough movies
+                        if len(all_movies) >= 100:
+                            break
             except Exception as e:
                 print(f"Error fetching from {region_code}: {e}")
                 continue
+            
+            # Break outer loop if we have enough
+            if len(all_movies) >= 100:
+                break
         
         # If we don't have enough movies from TMDB, return what we have
-        # Don't use fallback since those movies have already been released
-        return all_movies[:200]  # Increase limit to show up to 200 movies
+        return all_movies[:100]  # Return up to 100 movies
     
     def _get_tmdb_latest_movies_filtered(self, region: str = None, page: int = 1, start_date: datetime = None, end_date: datetime = None) -> List[Dict]:
         """Get movies from TMDB within specific date range (last 30 days)"""

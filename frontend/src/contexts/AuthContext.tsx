@@ -30,10 +30,11 @@ export const useAuth = () => useContext(AuthContext)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(false) // Start with false to avoid unnecessary loading screen
+  const [loading, setLoading] = useState(true) // Start with true for proper initialization
   const [signingIn, setSigningIn] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       console.log('Auth state changed:', user ? 'User found' : 'No user')
       if (user) {
@@ -64,7 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signInWithGoogle = async () => {
-    // Prevent multiple simultaneous sign-in attempts
     if (signingIn) {
       console.log('Sign-in already in progress...')
       return
@@ -74,9 +74,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSigningIn(true)
       console.log('Starting Google sign-in...')
       
-      // Ensure Firebase is properly initialized
-      const { initializeAuth } = await import('@/lib/firebase')
-      await initializeAuth()
+      // Ensure Firebase is ready
+      const { ensureAuthReady } = await import('@/lib/firebase')
+      await ensureAuthReady()
       
       const result = await signInWithPopup(auth, googleProvider)
       console.log('✓ Sign-in successful:', result.user.email)
@@ -84,16 +84,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error: any) {
       setSigningIn(false)
       
-      // Handle specific Firebase auth errors gracefully
       if (error.code === 'auth/cancelled-popup-request') {
-        console.log('Popup request cancelled - this is normal if you clicked sign in multiple times')
-        return // Don't throw error, just ignore it
+        console.log('Popup request cancelled')
+        return
       } else if (error.code === 'auth/popup-closed-by-user') {
         console.log('Popup closed by user')
-        return // User intentionally closed it
+        return
       }
       
-      console.error('Error signing in with Google:', error)
+      console.error('Error signing in:', error)
       throw error
     }
   }

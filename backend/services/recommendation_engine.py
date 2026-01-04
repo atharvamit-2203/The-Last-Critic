@@ -18,28 +18,28 @@ class RecommendationEngine:
         self.movie_db_service = None
     
     def load_data(self):
-        """Load movie dataset using both TMDB and Groq for maximum coverage"""
+        """Load comprehensive movie dataset (3000 movies) for search and recommendations"""
         all_movies = []
         
         try:
-            # Try TMDB first
+            # Try TMDB first - NO DATE FILTER for comprehensive database
             from services.tmdb_database_service import TMDBDatabaseService
             tmdb_service = TMDBDatabaseService()
             
             if tmdb_service.enabled:
-                print("🎬 Getting movies from TMDB...")
-                tmdb_movies = tmdb_service.generate_movie_database(1500)
+                print("🎬 Getting comprehensive movie database from TMDB...")
+                tmdb_movies = tmdb_service.generate_comprehensive_database(3000)  # All movies
                 if tmdb_movies:
                     all_movies.extend(tmdb_movies)
                     print(f"✅ TMDB: {len(tmdb_movies)} movies")
             
-            # Add Groq movies
+            # Add Groq movies for more variety
             from services.groq_service import GroqService
             groq_service = GroqService()
             
             if groq_service.enabled:
                 print("🤖 Getting movies from Groq...")
-                groq_movies = groq_service.generate_movie_database(1500)
+                groq_movies = groq_service.generate_movie_database(3000)
                 if groq_movies:
                     all_movies.extend(groq_movies)
                     print(f"✅ Groq: {len(groq_movies)} movies")
@@ -56,10 +56,10 @@ class RecommendationEngine:
                         unique_movies.append(movie)
                 
                 self.movies_df = pd.DataFrame(unique_movies)
-                print(f"🎯 Total unique movies: {len(self.movies_df)}")
+                print(f"🎯 Total unique movies for search/recommendations: {len(self.movies_df)}")
                 return
             
-            # Fallback to sample dataset
+            # Fallback to sample if needed
             print("⚠️ No movies from APIs, using sample dataset")
             self.create_sample_dataset()
             
@@ -67,115 +67,37 @@ class RecommendationEngine:
             print(f"❌ Error loading data: {e}")
             self.create_sample_dataset()
     
+    def get_latest_movies(self, limit: int = 100) -> List[Dict]:
+        """Get latest movies from last 30 days only (separate from main database)"""
+        try:
+            from services.tmdb_database_service import TMDBDatabaseService
+            tmdb_service = TMDBDatabaseService()
+            
+            if tmdb_service.enabled:
+                print(f"📅 Fetching latest movies from last 30 days...")
+                # This will use date filtering
+                latest_movies = tmdb_service.generate_latest_database(limit)
+                print(f"✅ Found {len(latest_movies)} latest movies")
+                return latest_movies
+            else:
+                print("❌ TMDB API not available for latest movies")
+                return []
+        except Exception as e:
+            print(f"❌ Error fetching latest movies: {e}")
+            return []
+    
     def create_sample_dataset(self):
-        """Create a comprehensive movie dataset from all industries"""
+        """Create a sample movie dataset as fallback for search/recommendations"""
         sample_movies = [
             {"id": 1, "title": "Bang Bang", "genres": "Action, Thriller, Romance", "description": "A young bank receptionist gets entangled in the world of international espionage", "rating": 5.6, "year": 2014, "release_month": 10},
             {"id": 2, "title": "The Matrix", "genres": "Action, Sci-Fi", "description": "A computer hacker learns about the true nature of reality", "rating": 8.7, "year": 1999, "release_month": 3},
             {"id": 3, "title": "Inception", "genres": "Action, Sci-Fi, Thriller", "description": "A thief who steals corporate secrets through dream-sharing technology", "rating": 8.8, "year": 2010, "release_month": 7},
             {"id": 4, "title": "The Dark Knight", "genres": "Action, Crime, Drama", "description": "Batman faces the Joker in a battle for Gotham's soul", "rating": 9.0, "year": 2008, "release_month": 7},
             {"id": 5, "title": "3 Idiots", "genres": "Comedy, Drama", "description": "Two friends search for their long lost companion who inspired them to think differently", "rating": 8.4, "year": 2009, "release_month": 12},
-            {"id": 6, "title": "Dangal", "genres": "Biography, Drama, Sport", "description": "Former wrestler Mahavir Singh Phogat trains his daughters to become world-class wrestlers", "rating": 8.4, "year": 2016, "release_month": 12},
-            {"id": 7, "title": "Baahubali", "genres": "Action, Drama, Fantasy", "description": "A young man learns about his royal heritage and fights to reclaim his kingdom", "rating": 8.0, "year": 2015, "release_month": 7},
-            {"id": 8, "title": "RRR", "genres": "Action, Drama, History", "description": "A fictitious story about two legendary freedom fighters", "rating": 7.9, "year": 2022, "release_month": 3},
-            {"id": 9, "title": "Pushpa", "genres": "Action, Crime, Thriller", "description": "A laborer rises through the ranks of a red sandalwood smuggling syndicate", "rating": 7.6, "year": 2021, "release_month": 12},
-            {"id": 10, "title": "KGF", "genres": "Action, Crime, Drama", "description": "Rocky rises from poverty to become the king of a gold mine", "rating": 8.2, "year": 2018, "release_month": 12},
-            {"id": 11, "title": "Parasite", "genres": "Comedy, Drama, Thriller", "description": "A poor family schemes to become employed by a wealthy family", "rating": 8.5, "year": 2019, "release_month": 5},
-            {"id": 12, "title": "Your Name", "genres": "Animation, Drama, Romance", "description": "Two teenagers share a profound, magical connection upon discovering they are swapping bodies", "rating": 8.2, "year": 2016, "release_month": 8},
-            {"id": 13, "title": "Avengers: Endgame", "genres": "Action, Adventure, Drama", "description": "The Avengers assemble once more to reverse Thanos' actions", "rating": 8.4, "year": 2019, "release_month": 4},
-            {"id": 14, "title": "Titanic", "genres": "Drama, Romance", "description": "A seventeen-year-old aristocrat falls in love with a poor artist aboard the Titanic", "rating": 7.9, "year": 1997, "release_month": 12},
-            {"id": 15, "title": "Sholay", "genres": "Action, Adventure, Drama", "description": "Two criminals are hired to capture a ruthless dacoit who terrorizes the region", "rating": 8.2, "year": 1975, "release_month": 8},
-            {"id": 16, "title": "Oldboy", "genres": "Action, Drama, Mystery", "description": "A man seeks revenge after being imprisoned for 15 years without knowing why", "rating": 8.4, "year": 2003, "release_month": 11},
-            {"id": 17, "title": "Train to Busan", "genres": "Action, Horror, Thriller", "description": "Passengers fight for survival during a zombie outbreak on a train", "rating": 7.6, "year": 2016, "release_month": 7},
-            {"id": 18, "title": "Spirited Away", "genres": "Animation, Adventure, Family", "description": "A girl enters a world ruled by gods and witches where humans are changed into beasts", "rating": 9.2, "year": 2001, "release_month": 7},
-            {"id": 19, "title": "Interstellar", "genres": "Adventure, Drama, Sci-Fi", "description": "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival", "rating": 8.6, "year": 2014, "release_month": 11},
-            {"id": 20, "title": "The Godfather", "genres": "Crime, Drama", "description": "The aging patriarch of an organized crime dynasty transfers control to his reluctant son", "rating": 9.2, "year": 1972, "release_month": 3},
-            
-            # More Bollywood
-            {"id": 21, "title": "Lagaan", "genres": "Drama, Musical, Sport", "description": "Villagers accept challenge to play cricket to avoid taxes", "rating": 8.1, "year": 2001, "release_month": 6},
-            {"id": 22, "title": "Dil Chahta Hai", "genres": "Comedy, Drama, Romance", "description": "Three friends navigate love and life after college", "rating": 8.1, "year": 2001, "release_month": 8},
-            {"id": 23, "title": "Zindagi Na Milegi Dobara", "genres": "Comedy, Drama, Musical", "description": "Three friends on Spanish bachelor party trip", "rating": 8.2, "year": 2011, "release_month": 7},
-            {"id": 24, "title": "Queen", "genres": "Comedy, Drama", "description": "Woman goes on honeymoon alone after breakup", "rating": 8.2, "year": 2014, "release_month": 3},
-            {"id": 25, "title": "PK", "genres": "Comedy, Drama, Sci-Fi", "description": "Alien questions religious beliefs in India", "rating": 8.1, "year": 2014, "release_month": 12},
-            {"id": 26, "title": "Taare Zameen Par", "genres": "Drama, Family", "description": "Teacher helps dyslexic child discover his potential", "rating": 8.4, "year": 2007, "release_month": 12},
-            {"id": 27, "title": "Chak De India", "genres": "Drama, Sport", "description": "Disgraced hockey player coaches women's team", "rating": 8.2, "year": 2007, "release_month": 8},
-            {"id": 28, "title": "Swades", "genres": "Drama", "description": "NASA scientist returns to reconnect with his roots", "rating": 8.2, "year": 2004, "release_month": 12},
-            {"id": 29, "title": "Rang De Basanti", "genres": "Comedy, Drama, History", "description": "Students become activists after reenacting revolutionaries", "rating": 8.1, "year": 2006, "release_month": 1},
-            {"id": 30, "title": "Barfi!", "genres": "Comedy, Drama, Romance", "description": "Deaf-mute man finds love in unexpected ways", "rating": 8.1, "year": 2012, "release_month": 9},
-            
-            # Horror Movies (2000s era)
-            {"id": 56, "title": "The Ring", "genres": "Horror, Mystery", "description": "Cursed videotape kills viewers in seven days", "rating": 7.1, "year": 2002, "release_month": 10},
-            {"id": 57, "title": "The Grudge", "genres": "Horror, Mystery", "description": "Curse spreads to anyone who enters haunted house", "rating": 5.9, "year": 2004, "release_month": 10},
-            {"id": 58, "title": "Saw", "genres": "Horror, Mystery, Thriller", "description": "Two men trapped in bathroom by serial killer", "rating": 7.6, "year": 2004, "release_month": 10},
-            {"id": 59, "title": "The Descent", "genres": "Adventure, Horror, Thriller", "description": "Women encounter creatures in underground cave", "rating": 7.2, "year": 2005, "release_month": 7},
-            {"id": 60, "title": "28 Days Later", "genres": "Drama, Horror, Sci-Fi", "description": "Rage virus turns people into zombies", "rating": 7.6, "year": 2002, "release_month": 6},
-            {"id": 61, "title": "Dawn of the Dead", "genres": "Action, Horror", "description": "Survivors trapped in mall during zombie outbreak", "rating": 7.3, "year": 2004, "release_month": 3},
-            {"id": 62, "title": "Shaun of the Dead", "genres": "Comedy, Horror", "description": "Slacker fights zombies to save girlfriend", "rating": 7.9, "year": 2004, "release_month": 9},
-            {"id": 63, "title": "The Others", "genres": "Horror, Mystery, Thriller", "description": "Mother and children experience supernatural events", "rating": 7.6, "year": 2001, "release_month": 8},
-            {"id": 64, "title": "Signs", "genres": "Drama, Horror, Mystery", "description": "Farmer discovers crop circles and alien invasion", "rating": 6.7, "year": 2002, "release_month": 8},
-            {"id": 65, "title": "The Sixth Sense", "genres": "Drama, Horror, Mystery", "description": "Boy sees dead people, psychologist helps him", "rating": 8.2, "year": 1999, "release_month": 8},
-            {"id": 66, "title": "Final Destination", "genres": "Horror, Thriller", "description": "Teenagers cheat death but it comes back for them", "rating": 6.7, "year": 2000, "release_month": 3},
-            {"id": 67, "title": "Scream 3", "genres": "Horror, Mystery", "description": "Ghostface killer returns for movie trilogy finale", "rating": 5.6, "year": 2000, "release_month": 2},
-            {"id": 68, "title": "What Lies Beneath", "genres": "Drama, Horror, Mystery", "description": "Wife discovers husband's dark secrets through supernatural events", "rating": 6.6, "year": 2000, "release_month": 7},
-            {"id": 69, "title": "The Blair Witch Project", "genres": "Horror, Mystery", "description": "Students disappear while filming documentary about witch", "rating": 6.5, "year": 1999, "release_month": 7},
-            {"id": 70, "title": "Jeepers Creepers", "genres": "Horror, Mystery", "description": "Siblings encounter ancient creature that feeds every 23 years", "rating": 6.2, "year": 2001, "release_month": 8},
-            {"id": 71, "title": "The Texas Chain Saw Massacre", "genres": "Horror", "description": "Remake of classic slasher about cannibal family", "rating": 6.2, "year": 2003, "release_month": 10},
-            {"id": 72, "title": "House of 1000 Corpses", "genres": "Horror", "description": "Travelers encounter sadistic family of killers", "rating": 6.1, "year": 2003, "release_month": 4},
-            {"id": 73, "title": "Cabin Fever", "genres": "Horror", "description": "College students infected by flesh-eating virus", "rating": 5.6, "year": 2002, "release_month": 9},
-            {"id": 74, "title": "Wrong Turn", "genres": "Horror, Thriller", "description": "Friends encounter cannibal mountain men in West Virginia", "rating": 6.1, "year": 2003, "release_month": 5},
-            {"id": 75, "title": "Darkness Falls", "genres": "Fantasy, Horror, Mystery", "description": "Tooth fairy legend becomes deadly reality", "rating": 5.0, "year": 2003, "release_month": 1},
-            
-            # Tollywood (Telugu)
-            {"id": 31, "title": "Eega", "genres": "Action, Fantasy, Romance", "description": "Man reincarnates as fly to get revenge", "rating": 7.7, "year": 2012, "release_month": 7},
-            {"id": 32, "title": "Arjun Reddy", "genres": "Drama, Romance", "description": "Surgeon spirals into self-destruction after breakup", "rating": 8.1, "year": 2017, "release_month": 8},
-            {"id": 33, "title": "Magadheera", "genres": "Action, Fantasy, Romance", "description": "Reincarnation love story spanning 400 years", "rating": 7.7, "year": 2009, "release_month": 7},
-            {"id": 34, "title": "Rangasthalam", "genres": "Action, Drama", "description": "Hearing-impaired man fights village corruption", "rating": 8.2, "year": 2018, "release_month": 3},
-            {"id": 35, "title": "Ala Vaikunthapurramuloo", "genres": "Action, Drama", "description": "Man discovers he was switched at birth", "rating": 7.2, "year": 2020, "release_month": 1},
-            
-            # Kollywood (Tamil)
-            {"id": 36, "title": "Vikram Vedha", "genres": "Action, Crime, Thriller", "description": "Gangster challenges cop's moral compass", "rating": 8.4, "year": 2017, "release_month": 7},
-            {"id": 37, "title": "Kaththi", "genres": "Action, Thriller", "description": "Thief impersonates look-alike activist", "rating": 8.1, "year": 2014, "release_month": 10},
-            {"id": 38, "title": "Thani Oruvan", "genres": "Action, Crime, Thriller", "description": "Cop pursues brilliant but corrupt scientist", "rating": 8.5, "year": 2015, "release_month": 8},
-            {"id": 39, "title": "Nayakan", "genres": "Crime, Drama", "description": "Boy becomes underworld don protecting slum dwellers", "rating": 8.6, "year": 1987, "release_month": 10},
-            {"id": 40, "title": "Super Deluxe", "genres": "Drama, Mystery, Thriller", "description": "Four interconnected stories explore morality", "rating": 8.3, "year": 2019, "release_month": 3},
-            
-            # Mollywood (Malayalam)
-            {"id": 41, "title": "Drishyam", "genres": "Crime, Drama, Thriller", "description": "Family man uses films to create perfect alibi", "rating": 8.6, "year": 2013, "release_month": 12},
-            {"id": 42, "title": "Premam", "genres": "Comedy, Drama, Romance", "description": "Man's three stages of love through life", "rating": 8.3, "year": 2015, "release_month": 5},
-            {"id": 43, "title": "Bangalore Days", "genres": "Comedy, Drama, Romance", "description": "Three cousins chase dreams in Bangalore", "rating": 8.3, "year": 2014, "release_month": 5},
-            {"id": 44, "title": "Maheshinte Prathikaaram", "genres": "Comedy, Drama", "description": "Photographer seeks revenge in village", "rating": 8.2, "year": 2016, "release_month": 2},
-            {"id": 45, "title": "Kumbalangi Nights", "genres": "Drama, Family", "description": "Four brothers find purpose through love", "rating": 8.7, "year": 2019, "release_month": 2},
-            
-            # Hollywood Action/Sci-Fi
-            {"id": 46, "title": "The Shawshank Redemption", "genres": "Drama", "description": "Banker befriends fellow prisoner over decades", "rating": 9.3, "year": 1994, "release_month": 9},
-            {"id": 47, "title": "The Dark Knight", "genres": "Action, Crime, Drama", "description": "Batman faces the anarchic Joker", "rating": 9.0, "year": 2008, "release_month": 7},
-            {"id": 48, "title": "Inception", "genres": "Action, Sci-Fi, Thriller", "description": "Thief enters dreams to plant ideas", "rating": 8.8, "year": 2010, "release_month": 7},
-            {"id": 49, "title": "The Matrix", "genres": "Action, Sci-Fi", "description": "Hacker discovers reality is simulation", "rating": 8.7, "year": 1999, "release_month": 3},
-            {"id": 50, "title": "Forrest Gump", "genres": "Drama, Romance", "description": "Simple man influences major historical events", "rating": 8.8, "year": 1994, "release_month": 7},
-            {"id": 51, "title": "The Lord of the Rings: The Return of the King", "genres": "Adventure, Drama, Fantasy", "description": "Final battle for Middle-earth", "rating": 9.0, "year": 2003, "release_month": 12},
-            {"id": 52, "title": "Pulp Fiction", "genres": "Crime, Drama", "description": "Interconnected LA crime stories", "rating": 8.9, "year": 1994, "release_month": 10},
-            {"id": 53, "title": "Fight Club", "genres": "Drama", "description": "Insomniac and soap maker form underground club", "rating": 8.8, "year": 1999, "release_month": 10},
-            {"id": 54, "title": "Gladiator", "genres": "Action, Adventure, Drama", "description": "General becomes gladiator for revenge", "rating": 8.5, "year": 2000, "release_month": 5},
-            {"id": 55, "title": "The Prestige", "genres": "Drama, Mystery, Sci-Fi", "description": "Rival magicians engage in deadly competition", "rating": 8.5, "year": 2006, "release_month": 10}
         ]
         
-        # Load additional 200 movies from data file
-        try:
-            import sys
-            import os
-            # Add backend directory to path
-            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if backend_dir not in sys.path:
-                sys.path.insert(0, backend_dir)
-            
-            from data.additional_movies import ADDITIONAL_MOVIES
-            sample_movies.extend(ADDITIONAL_MOVIES)
-            print(f"✓ Loaded {len(sample_movies)} movies from expanded sample dataset (including additional movies)")
-        except Exception as e:
-            print(f"⚠ Could not load additional movies: {e}")
-            print(f"✓ Loaded {len(sample_movies)} movies from base sample dataset")
-        
         self.movies_df = pd.DataFrame(sample_movies)
+        print(f"✓ Loaded {len(sample_movies)} sample movies for search/recommendations")
     
     def train_model(self):
         """Train the recommendation model using TF-IDF and cosine similarity"""
@@ -214,85 +136,63 @@ class RecommendationEngine:
             return matches.index[0]
         return None
     
-    def get_movies(self, limit: int = 100, search: Optional[str] = None) -> List[MovieResponse]:
-        """Get all movies for search/recommend functionality with priority on recent releases"""
+    def get_all_movies(self, limit: int = 100, search: Optional[str] = None) -> List[MovieResponse]:
+        """Get all movies without date filtering (for onboarding and search)"""
         if self.movies_df is None:
             return []
 
-        from datetime import datetime
-
-        # Get current date and calculate last month date range
-        current_date = datetime.now()
-        current_year = current_date.year
-        current_month = current_date.month
-        current_day = current_date.day
-
-        # Calculate date one month ago
-        if current_month == 1:
-            last_month_year = current_year - 1
-            last_month_month = 12
-        else:
-            last_month_year = current_year
-            last_month_month = current_month - 1
-
-        last_month_day = current_day  # Same day of previous month
-
-        # Filter movies from last month onwards
-        recent_movies_df = self.movies_df[
-            ((self.movies_df['year'] == current_year) & (self.movies_df['release_month'] >= last_month_month)) |
-            ((self.movies_df['year'] == last_month_year) & (self.movies_df['release_month'] >= last_month_month) & (self.movies_df['release_month'] <= 12)) |
-            (self.movies_df['year'] > current_year)
-        ].copy()
-
-        # For movies in the current year and last month, check day if month matches
-        if current_month == last_month_month + 1 or (current_month == 1 and last_month_month == 12):
-            # More precise filtering for exact month boundary
-            recent_condition = (
-                (self.movies_df['year'] == current_year) |
-                ((self.movies_df['year'] == last_month_year) & (self.movies_df['release_month'] >= last_month_month))
-            )
-            recent_movies_df = self.movies_df[recent_condition].copy()
-
-        # Get older movies (before last month)
-        older_movies_df = self.movies_df[
-            ~self.movies_df.index.isin(recent_movies_df.index)
-        ].copy()
+        filtered_df = self.movies_df.copy()
 
         # Apply search filter if provided
         if search:
             search_lower = search.lower()
-            
-            # Create search condition for recent movies
-            recent_search_condition = (
-                recent_movies_df['title'].str.lower().str.contains(search_lower, na=False) |
-                recent_movies_df['genres'].str.lower().str.contains(search_lower, na=False)
+            search_condition = (
+                filtered_df['title'].str.lower().str.contains(search_lower, na=False) |
+                filtered_df['genres'].str.lower().str.contains(search_lower, na=False)
             )
-            recent_movies_df = recent_movies_df.loc[recent_search_condition]
-            
-            # Create search condition for older movies
-            older_search_condition = (
-                older_movies_df['title'].str.lower().str.contains(search_lower, na=False) |
-                older_movies_df['genres'].str.lower().str.contains(search_lower, na=False)
-            )
-            older_movies_df = older_movies_df.loc[older_search_condition]
+            filtered_df = filtered_df.loc[search_condition]
 
-        # Sort recent movies by release date (newest first)
-        recent_movies_df = recent_movies_df.sort_values(
-            by=['year', 'release_month'],
+        # Sort by rating (highest first)
+        filtered_df = filtered_df.sort_values(by=['rating'], ascending=[False])
+
+        movies = []
+        for _, movie in filtered_df.head(limit).iterrows():
+            movies.append(MovieResponse(
+                id=int(movie['id']),
+                title=movie['title'],
+                genres=movie['genres'],
+                description=movie['description'],
+                rating=float(movie['rating']),
+                year=int(movie['year']),
+                release_month=int(movie['release_month']) if pd.notna(movie['release_month']) else None
+            ))
+
+        return movies
+
+    def get_movies(self, limit: int = 100, search: Optional[str] = None) -> List[MovieResponse]:
+        """Get all movies from comprehensive database (for search and recommendations)"""
+        if self.movies_df is None or len(self.movies_df) == 0:
+            return []
+
+        df = self.movies_df.copy()
+
+        # Apply search filter if provided
+        if search:
+            search_lower = search.lower()
+            search_condition = (
+                df['title'].str.lower().str.contains(search_lower, na=False) |
+                df['genres'].str.lower().str.contains(search_lower, na=False)
+            )
+            df = df.loc[search_condition]
+
+        # Sort by popularity/rating
+        df = df.sort_values(
+            by=['rating', 'year'],
             ascending=[False, False]
         )
 
-        # Sort older movies by rating (highest first) for variety
-        older_movies_df = older_movies_df.sort_values(
-            by=['rating'],
-            ascending=[False]
-        )
-
-        # Combine recent movies first, then older movies
-        combined_df = pd.concat([recent_movies_df, older_movies_df])
-
         movies = []
-        for _, movie in combined_df.head(limit).iterrows():
+        for _, movie in df.head(limit).iterrows():
             movies.append(MovieResponse(
                 id=int(movie['id']),
                 title=movie['title'],
@@ -375,7 +275,9 @@ class RecommendationEngine:
                 'description': movie['description'],
                 'rating': float(movie['rating']),
                 'year': int(movie['year']),
-                'release_month': int(movie['release_month']) if pd.notna(movie['release_month']) else None
+                'release_month': int(movie['release_month']) if pd.notna(movie['release_month']) else None,
+                'mass_rating': round(float(movie['rating']) * 0.9, 1),
+                'cinephile_rating': round(min(float(movie['rating']) * 1.1, 9.0), 1)
             })
         
         return movies

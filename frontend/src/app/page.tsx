@@ -10,7 +10,8 @@ import PreferencesForm from '@/components/PreferencesForm'
 import Header from '@/components/Header'
 import MovieGrid from '@/components/MovieGrid'
 import MovieDetailModal from '@/components/MovieDetailModal'
-import { getMovies, getRecommendations, getLatestMovies, searchMoviesByPreferences } from '@/services/api'
+import UserProfile from '@/components/UserProfile'
+import { getMovies, getRecommendations, getLatestMovies, searchMoviesByPreferences, addRecommendation, waitForBackend } from '@/services/api'
 import type { Movie, UserPreferences, RecommendationResponse } from '@/types'
 
 export default function Home() {
@@ -29,14 +30,16 @@ export default function Home() {
   const [recommendation, setRecommendation] = useState<RecommendationResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'latest' | 'search'>('latest')
+  const [activeTab, setActiveTab] = useState<'latest' | 'search' | 'profile'>('latest')
   const [preferenceSearchResults, setPreferenceSearchResults] = useState<Movie[]>([])
   const [isSearchingByPreferences, setIsSearchingByPreferences] = useState(false)
   const [loadingStates, setLoadingStates] = useState({
     movies: false,
     latestMovies: false,
-    recommendations: false
+    recommendations: false,
+    backend: true
   })
+  const [backendReady, setBackendReady] = useState(false)
 
   const loadMovies = async () => {
     if (loadingStates.movies || movies.length > 0) return
@@ -59,61 +62,73 @@ export default function Home() {
     setLoadingStates(prev => ({ ...prev, latestMovies: true }))
     try {
       setError(null)
+      // Always clear cache for fresh data
+      const { requestCache } = require('@/utils/requestCache')
+      requestCache.clear('latest')
+      
       const data = await getLatestMovies()
-      setLatestMovies(data.movies || [])
-      if (data.movies && data.movies.length > 0) {
+      // Only set if we get valid movies with proper structure
+      if (data.movies && Array.isArray(data.movies) && data.movies.length > 0) {
+        setLatestMovies(data.movies)
         console.log(`✓ Loaded ${data.movies.length} latest movies`)
+      } else {
+        throw new Error('No valid movies received')
       }
     } catch (err: any) {
       console.error('Error loading latest movies:', err)
       const errorMsg = err.message || 'Failed to load latest movies'
       setError(errorMsg)
       
-      // Auto-clear error after 5 seconds
       setTimeout(() => setError(null), 5000)
       
-      // Use fallback from our database immediately
-      try {
-        const fallbackMovies = await getMovies(25)
-        setLatestMovies(fallbackMovies.map(m => ({
-          id: m.id,
-          title: m.title,
-          description: m.description,
-          rating: m.rating,
-          year: m.year.toString(),
-          genres: m.genres,
-          industry: 'International',
-          popularity: 1000
-        })))
-        console.log(`✓ Using ${fallbackMovies.length} movies from database as fallback`)
-      } catch (fallbackErr) {
-        console.error('Fallback also failed:', fallbackErr)
-      }
+      // NO FALLBACK - Only show latest movies from TMDB
+      console.log('❌ No fallback movies - only latest releases are shown')
     } finally {
       setLoadingStates(prev => ({ ...prev, latestMovies: false }))
     }
   }
 
+  // Wait for backend to be ready
+  useEffect(() => {
+    const checkBackend = async () => {
+      const ready = await waitForBackend()
+      setBackendReady(ready)
+      setLoadingStates(prev => ({ ...prev, backend: false }))
+      if (!ready) {
+        setError('Backend is not responding. Please start the backend server.')
+      }
+    }
+    checkBackend()
+  }, [])
+
   // Load latest movies immediately on component mount
   useEffect(() => {
-    loadLatestMovies()
+    // Don't load on initial mount, wait for user authentication
   }, [])
 
   // Check onboarding status and load movies
   useEffect(() => {
-    if (user) {
+    if (user && backendReady) {
       const onboardingComplete = localStorage.getItem(`onboarding_${user.uid}`)
       const isComplete = onboardingComplete === 'true'
       setHasCompletedOnboarding(isComplete)
+      
+      // Load saved preferences
+      const savedPreferences = localStorage.getItem(`preferences_${user.uid}`)
+      if (savedPreferences) {
+        try {
+          const prefs = JSON.parse(savedPreferences)
+          setPreferences(prefs)
+        } catch (err) {
+          console.error('Error loading preferences:', err)
+        }
+      }
       
       // Load recommendation movies if onboarding is complete
       if (isComplete) {
         loadMovies()
         
-        // Clear cache and force fresh load of latest movies
-        const { requestCache } = require('@/utils/requestCache')
-        requestCache.clear('latest')
-        setLatestMovies([])
+        // Load latest movies properly after authentication
         loadLatestMovies()
         
         // Load personalized recommendations from localStorage
@@ -126,9 +141,12 @@ export default function Home() {
             console.error('Error loading saved recommendations:', err)
           }
         }
+      } else {
+        // Load latest movies even if onboarding not complete
+        loadLatestMovies()
       }
     }
-  }, [user])
+  }, [user, backendReady])
 
   // Listen for logout events from other tabs
   useEffect(() => {
@@ -196,7 +214,12 @@ export default function Home() {
     }
   }
 
-  // Show login page if not authenticated
+  // Show login page immediately if not authenticated
+  if (!user && !authLoading) {
+    return <LoginPage />
+  }
+
+  // Show loading only for authentication
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 flex items-center justify-center">
@@ -209,33 +232,65 @@ export default function Home() {
     )
   }
 
+  // Show onboarding immediately if user exists but hasn't completed onboarding
+  if (user) {
+    const onboardingComplete = localStorage.getItem(`onboarding_${user.uid}`)
+    if (onboardingComplete !== 'true') {
+      return <OnboardingPage onComplete={handleOnboardingComplete} />
+    }
+  }
+
+  if (!backendReady) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-red-400 text-xl mb-4">⚠️ Backend Not Available</div>
+          <div className="text-white text-lg mb-2">Please start the backend server first</div>
+          <div className="text-gray-400 text-sm">Run: python main.py in the backend directory</div>
+        </div>
+      </div>
+    )
+  }
+
   if (!user) {
     return <LoginPage />
   }
 
-  // Show onboarding if not completed
-  if (!hasCompletedOnboarding) {
-    return <OnboardingPage onComplete={handleOnboardingComplete} />
-  }
+  // Show onboarding if not completed (already handled above)
+  // This section is now redundant
 
   const handleMovieSelect = async (movie: Movie) => {
     setSelectedMovie(movie)
     setError(null)
     setLoading(true)
 
-    // Learn from this selection
-    await learnFromUserInteraction(movie)
-
     try {
+      // Learn from this selection (silently)
+      await learnFromUserInteraction(movie)
+      
+      // Add to user recommendations
+      if (user) {
+        await addRecommendation(user.uid, {
+          movie_id: movie.id,
+          movie_title: movie.title,
+          movie_genres: movie.genres,
+          movie_rating: movie.rating,
+          movie_year: movie.year,
+          movie_description: movie.description,
+          source: 'user_click'
+        })
+      }
+      
       const result = await getRecommendations({
         movie_title: movie.title,
         user_preferences: preferences,
         num_recommendations: 5
       })
       setRecommendation(result)
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error getting recommendations:', err)
-      setError('Failed to get recommendations')
+      // Don't show error to user, just log it
+      console.log('Recommendation failed, but continuing silently')
     } finally {
       setLoading(false)
     }
@@ -327,14 +382,6 @@ export default function Home() {
       // Save learned preferences
       localStorage.setItem(`preferences_${user.uid}`, JSON.stringify(updatedPreferences))
       
-      // Get new recommendations based on clicked movie
-      const result = await getRecommendations({
-        movie_title: movie.title,
-        user_preferences: updatedPreferences,
-        num_recommendations: 5
-      })
-      setRecommendation(result)
-      
     } catch (err) {
       console.error('Error learning from interaction:', err)
     }
@@ -376,7 +423,14 @@ export default function Home() {
         
         <div className="flex space-x-4 mb-8">
           <button
-            onClick={() => setActiveTab('latest')}
+            onClick={() => {
+              setActiveTab('latest')
+              // Force fresh load when switching to latest tab
+              const { requestCache } = require('@/utils/requestCache')
+              requestCache.clear('latest')
+              setLatestMovies([])
+              loadLatestMovies()
+            }}
             className={`px-6 py-3 rounded-xl font-semibold transition-all ${
               activeTab === 'latest'
                 ? 'bg-blue-500 text-white shadow-lg'
@@ -398,6 +452,16 @@ export default function Home() {
           >
             🔍 Search & Recommend
           </button>
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`px-6 py-3 rounded-xl font-semibold transition-all ${
+              activeTab === 'profile'
+                ? 'bg-blue-500 text-white shadow-lg'
+                : 'bg-white/10 text-gray-300 hover:bg-white/20'
+            }`}
+          >
+            👤 My Profile
+          </button>
         </div>
 
         {activeTab === 'latest' && (
@@ -413,7 +477,12 @@ export default function Home() {
                   </p>
                 </div>
                 <button
-                  onClick={loadLatestMovies}
+                  onClick={() => {
+                    const { requestCache } = require('@/utils/requestCache')
+                    requestCache.clear('latest')
+                    setLatestMovies([])
+                    loadLatestMovies()
+                  }}
                   className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
                 >
                   Refresh
@@ -486,18 +555,74 @@ export default function Home() {
                       {preferenceSearchResults.map((movie) => (
                         <div
                           key={movie.id}
-                          onClick={() => handleMovieSelect(movie)}
-                          className="bg-white/5 rounded-lg p-4 hover:bg-white/10 transition-all cursor-pointer border border-white/10 hover:border-blue-500/50"
+                          className="bg-white/5 rounded-lg p-4 hover:bg-white/10 transition-all border border-white/10 hover:border-blue-500/50 relative"
                         >
-                          <h4 className="text-white font-bold text-lg mb-2">{movie.title}</h4>
-                          <p className="text-gray-300 text-sm mb-3 line-clamp-2">{movie.description}</p>
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-400">{movie.genres}</span>
-                            <div className="flex items-center space-x-2">
-                              <span className="text-gray-400">{movie.year}</span>
-                              <span className="text-yellow-400">⭐ {movie.rating}</span>
+                          <div onClick={() => handleMovieSelect(movie)} className="cursor-pointer pr-12">
+                            <h4 className="text-white font-bold text-lg mb-2">{movie.title}</h4>
+                            <p className="text-gray-300 text-sm mb-3 line-clamp-2">{movie.description}</p>
+                            
+                            {/* Mass and Cinephile Ratings */}
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center space-x-3">
+                                <div className="text-center">
+                                  <div className="text-blue-400 text-xs font-semibold">MASSES</div>
+                                  <div className="text-blue-300 font-bold">{movie.mass_rating || (movie.rating * 0.9).toFixed(1)}/10</div>
+                                </div>
+                                <div className="text-center">
+                                  <div className="text-purple-400 text-xs font-semibold">CRITICS</div>
+                                  <div className="text-purple-300 font-bold">{movie.cinephile_rating || Math.min(movie.rating * 1.1, 9.0).toFixed(1)}/10</div>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-gray-400">{movie.genres}</span>
+                              <div className="flex items-center space-x-2">
+                                <span className="text-gray-400">{movie.year}</span>
+                                <span className="text-yellow-400">⭐ {movie.rating}</span>
+                              </div>
                             </div>
                           </div>
+                          
+                          {/* Recommend Button */}
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              if (!user) return
+                              try {
+                                await addRecommendation(user.uid, {
+                                  movie_id: movie.id,
+                                  movie_title: movie.title,
+                                  movie_genres: movie.genres,
+                                  movie_rating: movie.rating,
+                                  movie_year: movie.year,
+                                  movie_description: movie.description,
+                                  source: 'preference_search'
+                                })
+                                const recommendedMovies = JSON.parse(localStorage.getItem(`recommended_${user.uid}`) || '[]')
+                                if (!recommendedMovies.includes(movie.id)) {
+                                  recommendedMovies.push(movie.id)
+                                  localStorage.setItem(`recommended_${user.uid}`, JSON.stringify(recommendedMovies))
+                                }
+                                const button = e.target as HTMLElement
+                                button.textContent = '✓'
+                                button.classList.add('bg-green-500')
+                              } catch (error) {
+                                console.error('Error adding recommendation:', error)
+                              }
+                            }}
+                            className={`absolute top-4 right-4 p-2 rounded-full transition-colors ${
+                              user && JSON.parse(localStorage.getItem(`recommended_${user.uid}`) || '[]').includes(movie.id) 
+                                ? 'bg-green-500 text-white' 
+                                : 'bg-red-500 hover:bg-red-600 text-white'
+                            }`}
+                            title="Add to Recommendations"
+                          >
+                            {user && JSON.parse(localStorage.getItem(`recommended_${user.uid}`) || '[]').includes(movie.id) 
+                              ? '✓' 
+                              : '♥'
+                            }
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -511,6 +636,21 @@ export default function Home() {
                     <div className="bg-white/5 rounded-lg p-4">
                       <h4 className="text-white font-bold text-lg mb-2">{selectedMovie.title}</h4>
                       <p className="text-gray-300 text-sm mb-3">{selectedMovie.description}</p>
+                      
+                      {/* Mass and Cinephile Ratings */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center space-x-4">
+                          <div className="text-center">
+                            <div className="text-blue-400 text-xs font-semibold">MASSES APPEAL</div>
+                            <div className="text-blue-300 font-bold text-lg">{selectedMovie.mass_rating || (selectedMovie.rating * 0.9).toFixed(1)}/10</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-purple-400 text-xs font-semibold">CRITICS CONSENSUS</div>
+                            <div className="text-purple-300 font-bold text-lg">{selectedMovie.cinephile_rating || Math.min(selectedMovie.rating * 1.1, 9.0).toFixed(1)}/10</div>
+                          </div>
+                        </div>
+                      </div>
+                      
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-gray-400">{selectedMovie.genres}</span>
                         <div className="flex items-center space-x-2">
@@ -555,6 +695,10 @@ export default function Home() {
             </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'profile' && (
+          <UserProfile />
         )}
       </main>
 

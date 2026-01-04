@@ -142,6 +142,53 @@ class FirebaseService:
             print(f"Error getting favorites: {e}")
             return []
     
+    def add_recommendation(self, user_id: str, recommendation_data: Dict) -> Dict:
+        """Add movie to user's recommendations (prevent duplicates)"""
+        try:
+            # Check if recommendation already exists
+            existing_query = self.db.collection('recommendations').where(filter=firestore.FieldFilter('userId', '==', user_id)).where(filter=firestore.FieldFilter('movieId', '==', recommendation_data.get('movie_id')))
+            existing_docs = list(existing_query.stream())
+            
+            if existing_docs:
+                return {'success': True, 'message': 'Already recommended', 'recommendation_id': existing_docs[0].id}
+            
+            # Add new recommendation
+            recommendation_ref = self.db.collection('recommendations').add({
+                'userId': user_id,
+                'movieId': recommendation_data.get('movie_id'),
+                'movieTitle': recommendation_data.get('movie_title'),
+                'movieGenres': recommendation_data.get('movie_genres'),
+                'movieRating': recommendation_data.get('movie_rating'),
+                'movieYear': recommendation_data.get('movie_year'),
+                'movieDescription': recommendation_data.get('movie_description'),
+                'source': recommendation_data.get('source', 'user_click'),
+                'recommendedAt': firestore.SERVER_TIMESTAMP
+            })
+            return {'success': True, 'recommendation_id': recommendation_ref[1].id}
+        except Exception as e:
+            print(f"Error adding recommendation: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def get_user_recommendations(self, user_id: str) -> List[Dict]:
+        """Get user's recommended movies"""
+        try:
+            recommendations_ref = self.db.collection('recommendations')
+            query = recommendations_ref.where(filter=firestore.FieldFilter('userId', '==', user_id)).limit(50)
+            docs = query.stream()
+            
+            recommendations = []
+            for doc in docs:
+                data = doc.to_dict()
+                data['id'] = doc.id
+                recommendations.append(data)
+            
+            # Sort by timestamp in Python instead of Firestore
+            recommendations.sort(key=lambda x: x.get('recommendedAt', 0), reverse=True)
+            return recommendations
+        except Exception as e:
+            print(f"Error getting recommendations: {e}")
+            return []
+    
     def initialize_collections(self):
         """Initialize Firestore collections with sample structure"""
         try:
@@ -161,6 +208,20 @@ class FirebaseService:
                 'favorites': []
             }
             self.db.collection('users').document('sample_user').set(sample_user)
+            
+            # Initialize recommendations collection
+            sample_recommendation = {
+                'userId': 'sample_user',
+                'movieId': 1,
+                'movieTitle': 'Sample Movie',
+                'movieGenres': 'Action, Drama',
+                'movieRating': 8.0,
+                'movieYear': 2023,
+                'movieDescription': 'Sample movie description',
+                'source': 'user_click',
+                'recommendedAt': firestore.SERVER_TIMESTAMP
+            }
+            self.db.collection('recommendations').add(sample_recommendation)
             print("Firestore collections initialized successfully")
             return {'success': True}
         except Exception as e:

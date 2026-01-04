@@ -1,7 +1,9 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Search } from 'lucide-react'
+import { Search, Heart } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { addRecommendation } from '@/services/api'
 import type { Movie } from '@/types'
 
 interface MovieSearchProps {
@@ -11,6 +13,7 @@ interface MovieSearchProps {
 }
 
 export default function MovieSearch({ movies, onMovieSelect, selectedMovie }: MovieSearchProps) {
+  const { user } = useAuth()
   const [searchTerm, setSearchTerm] = useState('')
   const [showResults, setShowResults] = useState(false)
 
@@ -23,6 +26,42 @@ export default function MovieSearch({ movies, onMovieSelect, selectedMovie }: Mo
     onMovieSelect(movie)
     setSearchTerm(movie.title)
     setShowResults(false)
+  }
+
+  const handleRecommend = async (e: React.MouseEvent, movie: Movie) => {
+    e.stopPropagation()
+    
+    if (!user) return
+    
+    try {
+      await addRecommendation(user.uid, {
+        movie_id: movie.id,
+        movie_title: movie.title,
+        movie_genres: movie.genres,
+        movie_rating: movie.rating,
+        movie_year: movie.year,
+        movie_description: movie.description,
+        source: 'search_recommend'
+      })
+      
+      const recommendedMovies = JSON.parse(localStorage.getItem(`recommended_${user.uid}`) || '[]')
+      if (!recommendedMovies.includes(movie.id)) {
+        recommendedMovies.push(movie.id)
+        localStorage.setItem(`recommended_${user.uid}`, JSON.stringify(recommendedMovies))
+      }
+      
+      const button = e.target as HTMLElement
+      button.textContent = '✓'
+      button.classList.add('bg-green-500')
+    } catch (error) {
+      console.error('Error adding recommendation:', error)
+    }
+  }
+
+  const isRecommended = (movieId: number) => {
+    if (!user) return false
+    const recommendedMovies = JSON.parse(localStorage.getItem(`recommended_${user.uid}`) || '[]')
+    return recommendedMovies.includes(movieId)
   }
 
   return (
@@ -49,17 +88,27 @@ export default function MovieSearch({ movies, onMovieSelect, selectedMovie }: Mo
         {showResults && searchTerm && filteredMovies.length > 0 && (
           <div className="absolute z-10 w-full mt-2 bg-gray-800 border border-gray-700 rounded-lg shadow-xl max-h-96 overflow-y-auto">
             {filteredMovies.map((movie) => (
-              <button
-                key={movie.id}
-                onClick={() => handleMovieClick(movie)}
-                className="w-full text-left px-4 py-3 hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0"
-              >
-                <div className="text-white font-medium">{movie.title}</div>
-                <div className="text-gray-400 text-sm">{movie.genres} • {movie.year}</div>
-                <div className="flex items-center mt-1">
-                  <span className="text-yellow-400 text-sm">⭐ {movie.rating}</span>
-                </div>
-              </button>
+              <div key={movie.id} className="relative">
+                <button
+                  onClick={() => handleMovieClick(movie)}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0"
+                >
+                  <div className="text-white font-medium pr-12">{movie.title}</div>
+                  <div className="text-gray-400 text-sm">{movie.genres} • {movie.year}</div>
+                  <div className="flex items-center mt-1">
+                    <span className="text-yellow-400 text-sm">⭐ {movie.rating}</span>
+                  </div>
+                </button>
+                <button
+                  onClick={(e) => handleRecommend(e, movie)}
+                  className={`absolute right-2 top-1/2 transform -translate-y-1/2 p-1 rounded-full transition-colors ${
+                    isRecommended(movie.id) ? 'bg-green-500 text-white' : 'bg-red-500 hover:bg-red-600 text-white'
+                  }`}
+                  title="Add to Recommendations"
+                >
+                  {isRecommended(movie.id) ? '✓' : <Heart className="w-3 h-3" />}
+                </button>
+              </div>
             ))}
           </div>
         )}

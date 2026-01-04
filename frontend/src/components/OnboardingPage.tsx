@@ -3,7 +3,7 @@
 import React, { useState } from 'react'
 import { Search, Sparkles, ArrowRight, Plus, X } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { getMovies } from '@/services/api'
+import { getAllMovies } from '@/services/api'
 import type { Movie } from '@/types'
 
 interface OnboardingPageProps {
@@ -39,7 +39,7 @@ export default function OnboardingPage({ onComplete }: OnboardingPageProps) {
     
     if (query.length >= 2) {
       try {
-        const movies = await getMovies(100, query)
+        const movies = await getAllMovies(100, query)
         setSuggestions(movies.slice(0, 10))
         setShowSuggestions(true)
       } catch (error) {

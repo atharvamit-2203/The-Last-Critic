@@ -2,7 +2,7 @@ import axios from 'axios'
 import type { Movie, RecommendationRequest, RecommendationResponse } from '@/types'
 import { requestCache } from '@/utils/requestCache'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000')
 
 const api = axios.create({
   baseURL: API_URL,
@@ -11,6 +11,18 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 })
+
+export const getAllMovies = async (limit: number = 100, search?: string): Promise<Movie[]> => {
+  const cacheKey = `all_movies_${limit}_${search || 'all'}`
+  return requestCache.get(cacheKey, async () => {
+    const params = new URLSearchParams()
+    params.append('limit', limit.toString())
+    if (search) params.append('search', search)
+    
+    const response = await api.get<Movie[]>(`/api/all-movies?${params.toString()}`)
+    return response.data
+  })
+}
 
 export const getMovies = async (limit: number = 100, search?: string): Promise<Movie[]> => {
   const cacheKey = `movies_${limit}_${search || 'all'}`
@@ -41,6 +53,19 @@ export const checkHealth = async (): Promise<{ status: string }> => {
   return response.data
 }
 
+export const waitForBackend = async (maxRetries: number = 30): Promise<boolean> => {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await checkHealth()
+      return true
+    } catch (error) {
+      console.log(`Backend not ready, retrying... (${i + 1}/${maxRetries})`)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+    }
+  }
+  return false
+}
+
 export const chatWithAI = async (message: string): Promise<{ response: string }> => {
   const response = await api.post('/api/chat', { message })
   return response.data
@@ -52,9 +77,10 @@ export const getLatestMovies = async (region?: string, page: number = 1): Promis
     const params = new URLSearchParams()
     if (region) params.append('region', region)
     params.append('page', page.toString())
+    params.append('limit', '100')  // Request 100 movies
     
     const response = await api.get(`/api/latest-movies?${params.toString()}`, {
-      timeout: 30000
+      timeout: 10000  // Reduce timeout to 10 seconds
     })
     return response.data
   }, 300000) // Cache for 5 minutes instead of 10
@@ -77,5 +103,24 @@ export const searchMoviesByPreferences = async (preferences: {
   limit?: number
 }): Promise<Movie[]> => {
   const response = await api.post<Movie[]>('/api/movies/search-by-preferences', preferences)
+  return response.data
+}
+
+// User recommendation functions
+export const addRecommendation = async (userId: string, movieData: {
+  movie_id: number
+  movie_title: string
+  movie_genres: string
+  movie_rating: number
+  movie_year: number
+  movie_description: string
+  source?: string
+}): Promise<any> => {
+  const response = await api.post(`/api/auth/user/${userId}/recommendations`, movieData)
+  return response.data
+}
+
+export const getUserRecommendations = async (userId: string): Promise<any> => {
+  const response = await api.get(`/api/auth/user/${userId}/recommendations`)
   return response.data
 }

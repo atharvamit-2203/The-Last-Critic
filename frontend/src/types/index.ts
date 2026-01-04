@@ -8,6 +8,12 @@ export interface Movie {
   release_month?: number
   reason?: string
   similarity_score?: number
+  mass_rating?: number
+  cinephile_rating?: number
+  poster_url?: string
+  backdrop_url?: string
+  language?: string
+  industry?: string
 }
 
 export interface UserPreferences {

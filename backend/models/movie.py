@@ -1,6 +1,17 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 
+class RecommendedMovie(BaseModel):
+    user_id: str
+    movie_id: int
+    movie_title: str
+    movie_genres: str
+    movie_rating: float
+    movie_year: int
+    movie_description: str
+    recommended_at: str
+    source: str = "user_click"  # "user_click", "onboarding", "preference_search"
+
 class MovieResponse(BaseModel):
     id: int
     title: str
@@ -11,6 +22,8 @@ class MovieResponse(BaseModel):
     release_month: Optional[int] = None
     reason: Optional[str] = None
     similarity_score: Optional[float] = None
+    mass_rating: Optional[float] = None
+    cinephile_rating: Optional[float] = None
 
 class RecommendationRequest(BaseModel):
     movie_title: str = Field(..., description="Title of the movie to get recommendations for")

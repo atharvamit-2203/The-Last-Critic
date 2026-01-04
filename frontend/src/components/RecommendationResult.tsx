@@ -20,9 +20,9 @@ export default function RecommendationResult({ recommendation, onMovieSelect }: 
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full">
       {/* Main Recommendation Card */}
-      <div className={`bg-white/10 backdrop-blur-md rounded-xl p-8 shadow-xl border-2 ${
+      <div className={`bg-white/10 backdrop-blur-md rounded-xl p-8 shadow-xl border-2 w-full ${
         should_watch ? 'border-green-500' : 'border-red-500'
       }`}>
         <div className="flex items-start justify-between mb-6">
@@ -64,7 +64,9 @@ export default function RecommendationResult({ recommendation, onMovieSelect }: 
 
         <div className="bg-blue-500/20 border border-blue-500/30 rounded-lg p-4">
           <h3 className="text-white font-semibold mb-2">Analysis</h3>
-          <p className="text-gray-200 whitespace-pre-wrap break-words">{reason}</p>
+          <p className="text-gray-200 whitespace-pre-wrap break-words leading-relaxed overflow-auto max-w-full">
+            {reason}
+          </p>
         </div>
       </div>
 
